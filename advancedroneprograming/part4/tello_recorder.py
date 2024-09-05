@@ -26,10 +26,16 @@ def record_video():
         # 프레임 읽기
         frame = frame_read.frame
         if frame is not None:
+            
+            # (im show 위로 위치변경)프레임을 비디오 파일로 저장
+            video_writer.write(frame)
+            
             cv2.imshow("Tello Frame", frame)
 
+            """
             # 프레임을 비디오 파일로 저장
             video_writer.write(frame)
+            """
 
             key = cv2.waitKey(1)
             if key == ord('q'):  # 'q' 키를 눌러 종료
@@ -37,8 +43,8 @@ def record_video():
         else:
             print("Failed to capture frame")
 
-    cv2.destroyAllWindows()
     video_writer.release()  # 비디오 파일 닫기
+    cv2.destroyAllWindows()
 
 # 비디오 녹화 시작
 record_video()

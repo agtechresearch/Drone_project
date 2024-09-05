@@ -26,6 +26,9 @@ fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 fps = 30  # 비디오의 FPS 설정
 
 def videoRecorder():
+    # 함수 외부에 있는 변수를 함수 내부에서도 사용
+    global frame_read, keepRecording
+
     # VideoWriter 객체 생성
     height, width, _ = frame_read.frame.shape
     video = cv2.VideoWriter('tello_video.mp4', fourcc, fps, (width, height))
@@ -47,6 +50,7 @@ def videoRecorder():
         time.sleep(1 / fps)  # 비디오 속도 조절
 
     video.release()
+    cv2.destroyAllWindows()
 
 # 비디오 레코더를 별도 스레드에서 실행
 recorder = threading.Thread(target=videoRecorder)
