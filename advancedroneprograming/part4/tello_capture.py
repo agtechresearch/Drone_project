@@ -10,7 +10,7 @@ tello.connect()
 tello.streamon()
 
 # 약간의 대기 시간 추가 (스트리밍 초기화 시간 확보)
-time.sleep(5)  # 스트리밍 초기화에 더 많은 시간을 줍니다.
+time.sleep(3)  # 스트리밍 초기화에 더 많은 시간을 줍니다.
 
 # 프레임 읽기 객체
 frame_read = tello.get_frame_read()
