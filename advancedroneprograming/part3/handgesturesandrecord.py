@@ -30,7 +30,7 @@ fps = 30  # 프레임 속도
 
 # 비디오 코덱 설정 및 VideoWriter 객체 생성
 fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-video_writer = cv2.VideoWriter('tello_video.avi', fourcc, fps, (width, height))
+video_writer = cv2.VideoWriter('tello_video2.avi', fourcc, fps, (width, height))
 
 while True:
     # 프레임 읽기

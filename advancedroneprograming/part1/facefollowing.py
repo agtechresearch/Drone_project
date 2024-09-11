@@ -33,7 +33,7 @@ while True:
     # _, img = cap.read()
 
     img=me.get_frame_read().frame
-    img=cv2.resize(img,(640,480))
+    img=cv2.resize(img,(970,720))
     img,bboxs = detector.findFaces(img,True)
     xval=0
     yval=0

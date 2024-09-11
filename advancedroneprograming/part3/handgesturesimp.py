@@ -19,7 +19,8 @@ me.move_up(50)
 while True:
 
     img = me.get_frame_read().frame
-    img = cv2.resize(img, (640, 480))
+    img = cv2.resize(img, (960, 720))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     hands,img=detectorhand.findHands(img,draw=True)
     img,bboxs=detectorface.findFaces(img,draw=True)
 

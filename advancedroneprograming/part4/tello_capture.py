@@ -18,6 +18,7 @@ def take_picture():
     while True:
         # 프레임 읽기
         frame = frame_read.frame
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         if frame is not None:
             cv2.imshow("Tello Frame", frame)
             key = cv2.waitKey(1)
