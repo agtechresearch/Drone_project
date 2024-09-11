@@ -27,7 +27,7 @@ print(me.get_battery())
 me.streamoff()
 me.streamon()
 me.takeoff()
-me.move_up(30)
+me.move_up(60)
 
 while True:
     # _, img = cap.read()
@@ -46,7 +46,7 @@ while True:
 
         xval = int(xpid.update(cx))
         yval = int(ypid.update(cy))
-        zval = int(zpid.update(area))
+        zval = -(int(zpid.update(area)))
         # print(zval)
         imgplotx=myplotx.update(xval)
         imgploty=myploty.update(yval)
