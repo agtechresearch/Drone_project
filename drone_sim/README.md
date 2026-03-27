@@ -2,6 +2,9 @@
 
 ArduPilot + Gazebo Harmonic + ROS2 Humble 기반 드론 시뮬레이션 프로젝트
 
+## 데모
+![이륙 데모](media/takeoff.gif)
+
 ## 시스템 환경
 - OS: Ubuntu 22.04
 - ROS2: Humble
@@ -34,10 +37,7 @@ gz sim -v4 ~/ardupilot_gazebo/worlds/iris_runway.sdf
 ros2 launch mavros apm.launch fcu_url:=tcp://localhost:5760
 ```
 
-### 4. 드론 제어 코드 실행
+### 4. 드론 이륙 코드 실행
 ```bash
 python3 scripts/takeoff.py
 ```
-
-## 데모
-![이륙 영상](media/takeoff.mp4)
