@@ -39,5 +39,5 @@ ros2 launch mavros apm.launch fcu_url:=tcp://localhost:5760
 
 ### 4. 드론 이륙 코드 실행
 ```bash
-python3 scripts/takeoff.py
+python3 ~/Drone_project/drone_sim/scripts/takeoff.py
 ```
