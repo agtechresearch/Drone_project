@@ -169,6 +169,10 @@ runvisualize2.bat — visualize2.py 실행
 
 ## 개발 일지
 
+→ 날짜별 상세 진행 기록은 **[PROGRESS.md](./PROGRESS.md)** 를 참고해주세요.
+
+### 요약
+
 ### 2.28 – 3.2
 - 드론 조립 완료
 - Raspberry Pi 탑재 후 호버링 불안정 확인
