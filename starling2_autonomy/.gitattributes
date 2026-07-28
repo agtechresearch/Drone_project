@@ -1,0 +1,14 @@
+# 이 폴더의 파일은 리눅스(VOXL2 기체)에서 실행된다.
+# Windows 에서 clone 해도 CRLF 로 바뀌지 않도록 줄바꿈을 LF 로 고정한다.
+#
+# CRLF 로 체크아웃되면:
+#   - tools/*.sh 가 기체·맥에서 "bad interpreter: ...^M" 으로 실행 실패
+#   - 비행 코드 .py 의 shebang 이 깨짐
+#   - deploy.sh 의 md5 대조가 매번 어긋남
+
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf
+*.conf text eol=lf
