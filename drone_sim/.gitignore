@@ -1,0 +1,57 @@
+# PX4 소스 (별도 clone, 리포에 포함하지 않음)
+PX4-Autopilot/
+
+# Docker 관련 캐시/이미지는 GitHub에 못 올림
+*.tar
+*.tar.gz
+docker/*.tar
+
+# 로그 (큰 것만 제외, 발췌본은 logs/ 아래 포함)
+*.log
+logs/*/large_*
+logs/full_*
+
+# CSV 대량 데이터 (샘플만 포함)
+*.csv
+!logs/**/sample_*.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+*.egg-info/
+
+# VS Code / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# 임시 파일
+*~
+*.bak
+*.tmp
+
+# ROS / colcon
+build/
+install/
+log/
+
+# Gazebo
+.gazebo/
+
+# VNC 관련
+.vnc/
+.Xauthority*
+
+# 개인 노트 (원한다면 추적)
+# notes_private/

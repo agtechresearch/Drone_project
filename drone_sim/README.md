@@ -1,43 +1,107 @@
-# Drone Simulation
+# Drone Simulation (Starling 2)
 
-ArduPilot + Gazebo Harmonic + ROS2 Humble 기반 드론 시뮬레이션 프로젝트
+세종대학교 agtechlab의 식물공장 자율비행 드론 프로젝트 중 시뮬레이션 파트다.  
+실기 flight_code를 수정 없이 SITL 환경에서 검증하고, 나아가 sim-to-real gap을 측정하는 것이 목표다.
 
-## 데모
-![이륙 데모](media/takeoff.gif)
+## 개요
 
-## 시스템 환경
-- OS: Ubuntu 22.04
-- ROS2: Humble
-- Gazebo: Harmonic (8.x)
-- ArduPilot: ArduCopter SITL
-- MAVROS2
+- **대상 드론**: ModalAI Starling 2 (VOXL2 + voxl-px4 1.14.0-2.0.133)
+- **응용 환경**: 태백 NextOn 식물공장 QVIX R Module (딸기 재배)
+- **비행 조건**: GPS-denied 실내, VIO 기반 위치추정
+- **flight_code**: MAVSDK-Python 0.12.0 + Python 3.6.9
+- **주요 로직**: MAVSDK Offboard PositionNedYaw + voxl-inspect-pose 기반 도달 판정
 
-## 시뮬레이션 실행 순서
+## 시뮬레이션 아키텍처
 
-### 1. ArduCopter SITL 실행
-```bash
-cd ~/ardupilot
-./build/sitl/bin/arducopter --model JSON --speedup 1 \
-  --defaults Tools/autotest/default_params/copter.parm,Tools/autotest/default_params/gazebo-iris.parm \
-  --sim-address=127.0.0.1 \
-  --sim-port-in=9003 \
-  --sim-port-out=9002 \
-  -I0
+두 개의 Docker 컨테이너를 UDP로 연결하여 실기 환경과 동일한 통신 구조를 재현한다.
+
+```
+┌─────────────────────────────────┐         ┌─────────────────────────────────┐
+│  Container A: starling-sitl      │  UDP    │  Container B: starling-flight    │
+│  Ubuntu 22.04                    │  <---> │  Ubuntu 18.04                    │
+│  PX4 v1.14.0 + Gazebo Classic 11 │  14540 │  Python 3.6.9 + MAVSDK 0.12.0    │
+│  ROS2 Humble (자동 source 안 함) │         │  flight_code                     │
+│  VNC (GUI 원격 접근)              │         │  mavsdk_server                   │
+└─────────────────────────────────┘         └─────────────────────────────────┘
 ```
 
-### 2. Gazebo 실행
-```bash
-export DISPLAY=:1
-gz sim -v4 ~/ardupilot_gazebo/worlds/iris_runway.sdf
-# Gazebo 창에서 ▶ 재생 버튼 클릭
+- **Container A는 실기 하드웨어(voxl-px4) 대체**
+- **Container B는 실기와 동일한 flight_code 실행 환경**
+- flight_code 관점에서 SITL과 실기는 UDP endpoint만 다름
+
+## 스택 확정 근거
+
+실기 `voxl-px4 1.14.0-2.0.133`이 PX4 v1.14.0 베이스에 ModalAI 패치 133을 얹은 것이다. SITL도 이와 정확히 같은 PX4 태그를 써야 파라미터 이름(`EKF2_GPS_CTRL`, `SYS_HAS_GPS` 등)과 MAVLink 메시지 스펙이 일치한다.
+
+| 계층 | 버전 | 이유 |
+|---|---|---|
+| Host OS | Ubuntu 22.04.5 | PX4 v1.14 공식 지원 |
+| ROS2 | Humble | 22.04 페어 |
+| Gazebo | Classic 11 | PX4 v1.14 완전 지원, 이미 서버에 설치됨 |
+| PX4 | v1.14.0 | voxl-px4 base와 정렬 |
+| Python (SITL) | 3.10 | Ubuntu 22.04 기본 |
+| Python (flight_code) | 3.6.9 | 실기 환경과 동일 (Ubuntu 18.04 native) |
+| MAVSDK-Python | 0.12.0 | 실기와 동일 |
+
+## 현재 진행 상황
+
+`docs/milestones.md`를 참고할 것.
+
+- [x] Day 1 (7/28): 시뮬레이션 베이스라인 구축 완료
+- [ ] Day 2 (7/29): 간소화 QVIX 월드 + Starling 2 airframe
+- [ ] Day 3 (7/30): flight_code 실전 검증 (voxl_pose_reader의 SITL 대응)
+- [ ] Day 4 (7/31): 실기 대조 실험
+- [ ] Day 5 (8/1): sim-to-real gap 분석
+
+## 리포 구조
+
+```
+drone_sim/
+├── README.md               # 이 파일
+├── .gitignore
+├── docker/                 # Container A/B Dockerfile 및 실행 스크립트
+│   ├── Dockerfile          # Container A (SITL)
+│   ├── Dockerfile.flight   # Container B (flight_code)
+│   ├── build.sh
+│   ├── build_flight.sh
+│   ├── run.sh
+│   ├── run_flight.sh
+│   └── start_all.sh
+├── flight_code/            # 실기와 공유하는 비행 로직
+│   └── path_flight_phase1_v13.py
+├── logs/                   # 세션별 실행 로그
+│   └── day1/
+└── docs/                   # 셋업 절차, 저널, 마일스톤
+    ├── setup.md
+    ├── day1_journal.md
+    └── milestones.md
 ```
 
-### 3. MAVROS2 실행
+## 시작하기
+
+`docs/setup.md`를 순서대로 따르면 서버에서 Docker 컨테이너 두 개를 재현 가능하다.
+
+빠른 재개(이미 셋업된 상태에서):
+
 ```bash
-ros2 launch mavros apm.launch fcu_url:=tcp://localhost:5760
+# 호스트에서 컨테이너 시작
+~/starling_sim/docker/start_all.sh
+
+# Container A 진입 후 SITL 실행
+docker exec -it starling-sitl bash
+~/start_vnc.sh                          # VNC (선택)
+cd ~/PX4-Autopilot
+make px4_sitl gazebo-classic
+
+# 새 터미널에서 Container B 진입 후 flight_code 실행
+docker exec -it starling-flight bash
+MAVSDK_BIN=/usr/local/lib/python3.6/dist-packages/mavsdk/bin/mavsdk_server
+$MAVSDK_BIN -p 50051 udp://:14540 > ~/mavsdk_server.log 2>&1 &
+cd ~/workspace
+python3 path_flight_phase1_v13.py --csv auto --csv-sample-sec 1.0
 ```
 
-### 4. 드론 이륙 코드 실행
-```bash
-python3 ~/Drone_project/drone_sim/scripts/takeoff.py
-```
+## 관련 자료
+
+- ModalAI VOXL2 PX4 HITL 문서: https://docs.modalai.com/voxl2-PX4-hitl/
+- PX4 v1.14 GPS-denied simulation 논의: https://discuss.px4.io/t/px4-gps-denied-simulation-gazebo/33432
