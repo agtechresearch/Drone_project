@@ -124,11 +124,17 @@ main() → main_async(args)
   상수·CLI인자로만 있고 강제 로직이 없었다(CR 대비 회귀). v14에서 두 겹 펜스로 복구.
   단위테스트 25/25 + 기체 업로드·md5 검증 완료. **실비행 미검증.** → `docs/05`
 
+### ◐ 진행 중 (2026-07-28)
+- **`voa_pc_out` 파서 완성** — `flight/mpa_point_cloud.py`. 순수 파이썬 MPA 구독기.
+  단위테스트 60/60, 파싱 0.12ms/프레임(700점). **기체 실측 미검증**(SSH 미접속).
+  → `docs/08`. 좌표 부호를 실물로 확인하는 것이 남은 핵심 검증이다.
+
 ### ❌ 없는 것 / 미완 (구현 목표)
-- **장애물 회피 전무** — 코드에 obstacle/avoid/collision/tof/voa 관련 로직 0건.
-  ToF·VOA 데이터가 흐르는데 **파이썬 비행 로직이 전혀 읽지 않음**.
+- **장애물 회피 정책 미착수** — 데이터를 읽을 수단은 생겼으나 판단 로직이 없다.
+  비행 코드(v14)는 여전히 obstacle/avoid 관련 로직 0건.
   → PX4 Collision Prevention은 **Offboard에 개입 못 함이 3중 확증**됨(`docs/04`·`docs/06`·`docs/07`).
-  **파이썬 레벨 회피가 유일한 경로.** `voa_pc_out` 와이어포맷은 확정됨(`docs/07` §1-A).
+  **파이썬 레벨 회피가 유일한 경로.**
+  선행조건: **운용 환경(온실/실내/실외) 확인** — 임계값이 여기서 갈린다.
 - **매핑 없음** — `voxl-mapper` 미설치. 소스는 GitLab에 있고 ToF-only 호환이나
   beta + 제어권 충돌 위험으로 **도입 보류** (`docs/07` §4).
 - 배터리 저전압 failsafe (파이썬 레벨) 없음 — 단 PX4 `VOXLPM` 드라이버·`battery_helpers`
@@ -157,13 +163,15 @@ Drone_project/starling2_autonomy/
 │   └── 07_voxl_sdk_gitlab.md          VOXL SDK(GitLab) 93개 + docs.modalai.com
 ├── flight/                ← 비행 코드 원본 (기체에 배포되는 실체)
 │   ├── path_flight_phase1_v14.py      현행 메인 코드
+│   ├── mpa_point_cloud.py             voa_pc_out 구독기 (라이브러리 겸 진단 CLI)
 │   ├── legacy/                        v13·CR·초기판 (참조용, 배포 안 함)
 │   └── tools_onboard/                 기체에서 돌리는 보조 스크립트
 ├── tools/                 ← 기체 동기화
 │   ├── deploy.sh                      로컬 → 기체 (백업·md5·문법검증 포함)
 │   └── pull.sh                        기체 ↔ 저장소 대조 (drift 감지)
 └── analysis/              ← 단위테스트·분석 산출물
-    └── test_geofence_v14.py           v14 지오펜스 25항목 검증
+    ├── test_geofence_v14.py           v14 지오펜스 25항목 검증
+    └── test_mpa_point_cloud.py        포인트클라우드 파서 60항목 검증
 ```
 
 > **비행 코드의 원본은 이 저장소다.** 기체는 실행 사본이므로 기체에서 직접 편집하지 않는다.

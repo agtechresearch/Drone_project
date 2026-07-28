@@ -25,7 +25,8 @@ ModalAI **Starling 2**(온보드 VOXL2) 드론에 **장애물 회피 · 안전�
 |---|---|
 | 경로 비행 (지그재그 커버리지) | 동작 — `flight/path_flight_phase1_v14.py` |
 | 지오펜스 (위치 폭주 방어) | **v14에서 복구 완료.** 단위테스트 25/25, 기체 배포 완료, **실비행 미검증** |
-| 장애물 회피 | 조사 완료, **구현 미착수** — `voa_pc_out` 파서부터 |
+| 장애물 회피 — 데이터 입력 | **`voa_pc_out` 파서 완료.** 단위테스트 60/60, **기체 실측 미검증** |
+| 장애물 회피 — 정책 | 미착수. 선행조건인 **운용 환경(온실/실내/실외) 확인이 미해결** |
 | 매핑 | 미도입 (`voxl-mapper` 는 beta + 제어권 충돌 위험으로 보류) |
 | 배터리 저전압 failsafe | 없음 — PX4 레벨로 가능한지 먼저 확인 예정 |
 
@@ -54,6 +55,7 @@ ModalAI **Starling 2**(온보드 VOXL2) 드론에 **장애물 회피 · 안전�
 | [`docs/05`](docs/05_v14_geofence.md) | v14 지오펜스 복구 설계·검증 |
 | [`docs/06`](docs/06_modalai_github_org.md) | ModalAI GitHub 저장소 44개 전수 정리 + 기체 펌웨어 커밋 특정 |
 | [`docs/07`](docs/07_voxl_sdk_gitlab.md) | VOXL SDK(GitLab) 93개 + 와이어포맷 + 공식 회피 파라미터 |
+| [`docs/08`](docs/08_voa_pc_parser.md) | `voa_pc_out` 파서 구현·검증·한계 + 기체 실측 절차 |
 
 날짜별 작업 기록은 [`worklog/`](worklog/).
 
@@ -67,8 +69,16 @@ cd Drone_project/starling2_autonomy
 cp .env.example .env.local
 $EDITOR .env.local          # DRONE_HOST 를 ~/.ssh/config alias 로 지정
 
-# 지오펜스 단위테스트 — 기체 없이 실행 가능
-python analysis/test_geofence_v14.py
+# 단위테스트 — 둘 다 기체 없이 실행 가능
+python analysis/test_geofence_v14.py       # 지오펜스 25항목
+python analysis/test_mpa_point_cloud.py    # voa_pc_out 파서 60항목
+```
+
+기체에 연결돼 있다면 포인트클라우드를 직접 볼 수 있다.
+
+```bash
+./tools/deploy.sh flight/mpa_point_cloud.py
+ssh $DRONE_HOST "python3 /home/root/mpa_point_cloud.py voa_pc_out --seconds 5"
 ```
 
 아래 명령은 모두 `starling2_autonomy/` 안에서 실행한다.
