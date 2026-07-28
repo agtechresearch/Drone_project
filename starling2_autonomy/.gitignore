@@ -1,0 +1,26 @@
+# 접속 정보 (IP·호스트명 등 환경 고유값) — .env.example 을 복사해서 만들 것
+.env.local
+
+# Claude Code 로컬 설정 (머신 고유 권한 목록)
+.claude/settings.local.json
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 기체에서 내려받은 비행 로그 — 용량이 크고 재현 불가 데이터라 별도 보관
+logs/
+*.ulg
+*.ulog
+*.csv
+!docs/**/*.csv
+
+# 기체 pull 시 생기는 임시 비교본
+.pull_tmp/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
