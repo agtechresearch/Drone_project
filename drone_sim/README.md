@@ -20,7 +20,7 @@
 │  Container A: starling-sitl      │  UDP    │  Container B: starling-flight    │
 │  Ubuntu 22.04                    │  <---> │  Ubuntu 18.04                    │
 │  PX4 v1.14.0 + Gazebo Classic 11 │  14540 │  Python 3.6.9 + MAVSDK 0.12.0    │
-│  ROS2 Humble (자동 source 안 함) │         │  flight_code                     │
+│  Starling 2 airframe (iris_starling) │     │  flight_code                     │
 │  VNC (GUI 원격 접근)              │         │  mavsdk_server                   │
 └─────────────────────────────────┘         └─────────────────────────────────┘
 ```
@@ -43,15 +43,37 @@
 | Python (flight_code) | 3.6.9 | 실기 환경과 동일 (Ubuntu 18.04 native) |
 | MAVSDK-Python | 0.12.0 | 실기와 동일 |
 
+## Starling 2 airframe 이식
+
+Day 2에서 iris를 베이스로 Starling 2 실기 스펙을 반영한 `iris_starling` airframe을 추가했다.
+
+파라미터 출처: ModalAI 포크의 `boards/modalai/voxl2/target/voxl-px4-hitl-set-default-parameters.config`.
+
+| 항목 | 값 |
+|---|---|
+| 질량 | 0.275 kg |
+| 로터 위치 (P0, P2) | (0.15, ±0.25) |
+| 로터 위치 (P1, P3) | (-0.15, ±0.19) |
+| IMU 오프셋 | (0.027, 0.009, -0.019) m |
+| IMU 샘플링 | 800Hz |
+
+Starling 2 전용 airframe 정의는 ModalAI 리포에 없다. VOXL2는 표준 PX4 airframe 방식이 아니라 `target/voxl-px4-start` 실행 스크립트로 모듈을 로드하는 방식이라, 이 정의를 그대로 이식할 수 없었다. 대신 HITL config의 실측 파라미터를 활용하는 우회 방식으로 진행했다.
+
 ## 현재 진행 상황
 
 `docs/milestones.md`를 참고할 것.
 
-- [x] Day 1 (7/28): 시뮬레이션 베이스라인 구축 완료
-- [ ] Day 2 (7/29): 간소화 QVIX 월드 + Starling 2 airframe
-- [ ] Day 3 (7/30): flight_code 실전 검증 (voxl_pose_reader의 SITL 대응)
-- [ ] Day 4 (7/31): 실기 대조 실험
-- [ ] Day 5 (8/1): sim-to-real gap 분석
+- [x] **Day 1 (7/28)**: 시뮬레이션 베이스라인 구축 완료
+- [x] **Day 2 (8/3)**: Starling 2 airframe 이식 및 SITL 검증 완료
+- [ ] **Day 3**: flight_code의 SITL 대응 (voxl_pose_reader → MAVSDK 버전)
+- [ ] **Day 4**: 실기 대조 실험
+- [ ] **Day 5**: sim-to-real gap 분석
+
+## 일정 변경 이력
+
+**당초 계획 (7/28 기준)**: 7/28~8/1 5일 내 sim-to-real gap 분석까지 완료  
+**실제 진행**: QVIX 정밀 재현 트랙에서 2일 소진 후 실패 → 우선순위 재조정  
+**현재 계획**: airframe 이식과 flight_code 대응을 먼저 완료, 맵 재현은 별도 트랙(Week 2+)으로 분리
 
 ## 리포 구조
 
@@ -67,6 +89,10 @@ drone_sim/
 │   ├── run.sh
 │   ├── run_flight.sh
 │   └── start_all.sh
+├── airframe/               # Starling 2 airframe 정의 (Day 2 신규)
+│   ├── 4200_gazebo-classic_iris_starling
+│   ├── iris_starling/      # Gazebo 모델 (SDF, model.config)
+│   └── voxl-px4-hitl-set-default-parameters.config  # 실기 HITL config (원본)
 ├── flight_code/            # 실기와 공유하는 비행 로직
 │   └── path_flight_phase1_v13.py
 ├── logs/                   # 세션별 실행 로그
@@ -74,6 +100,7 @@ drone_sim/
 └── docs/                   # 셋업 절차, 저널, 마일스톤
     ├── setup.md
     ├── day1_journal.md
+    ├── day2_journal.md
     └── milestones.md
 ```
 
@@ -89,9 +116,9 @@ drone_sim/
 
 # Container A 진입 후 SITL 실행
 docker exec -it starling-sitl bash
-~/start_vnc.sh                          # VNC (선택)
+~/start_vnc.sh                                     # VNC (선택)
 cd ~/PX4-Autopilot
-make px4_sitl gazebo-classic
+make px4_sitl gazebo-classic_iris_starling         # Starling 2 airframe으로 SITL 시작
 
 # 새 터미널에서 Container B 진입 후 flight_code 실행
 docker exec -it starling-flight bash
@@ -100,6 +127,14 @@ $MAVSDK_BIN -p 50051 udp://:14540 > ~/mavsdk_server.log 2>&1 &
 cd ~/workspace
 python3 path_flight_phase1_v13.py --csv auto --csv-sample-sec 1.0
 ```
+
+## 별도 트랙 (Week 1 밖으로 분리한 것들)
+
+**QVIX 맵 정밀 재현**: 재배 선반, AprilTag, 조명, 딸기 텍스처 등 실측 기반 재현. Day 2에 시도했다가 실측 자료 부족으로 진전이 어려워 2일간 시간을 소모한 후 별도 트랙으로 분리. NextOn 방문 계측 계획 필요.
+
+**HITL 확장**: 실기 Starling 2와 서버를 시리얼/이더넷으로 연결하여 Gazebo 센서를 실기 PX4에 주입. voxl-px4의 HITL 지원 여부부터 확인 필요. Day 5 결과 나온 후 정말 필요한지 판단.
+
+**수확 드론 및 모바일 충전 스테이션**: 이번 Week 1 이후 확장 응용.
 
 ## 관련 자료
 
