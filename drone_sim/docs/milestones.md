@@ -4,6 +4,8 @@
 
 ## Week 1 (7/28 ~ 8/1) — Baseline & Sim-to-Real Gap
 
+**일정 재조정**: 7/28 Day 1은 예정대로 완료했으나, 8/3에 Day 2를 진행하게 되어 이후 일정이 뒤로 밀렸다. 새 일정은 아래 각 Day 참조.
+
 ### Day 1 (7/28): 시뮬레이션 베이스라인 완성 ✓
 
 - [x] 서버 환경 조사 및 스택 확정
@@ -19,31 +21,35 @@
 **성공 기준**: 실기 flight_code 코드를 수정 없이 SITL로 실행 → 달성  
 **저널**: [day1_journal.md](day1_journal.md)
 
-### Day 2 (7/29): 간소화 QVIX 월드 + Starling 2 airframe
+### Day 2 (8/3): Starling 2 airframe 이식 ✓
 
-- [ ] QVIX R Module 대략 도면 확보 (벽·기둥·통로 크기)
-- [ ] Gazebo 월드 SDF 작성 (벽, 바닥, 조명 대략)
-- [ ] AprilTag 위치 SDF 배치 (BEE35 프로젝트 좌표 재사용)
-- [ ] Starling 2 airframe SDF 이식 (질량, 관성, 모터 배치)
-- [ ] `indoor_vio_missing_gps.params` SITL 파라미터 적용
-- [ ] SITL 안에서 Starling 2 모델이 QVIX 월드에 뜨고 이륙 가능 확인
+- [x] ModalAI 포크에서 Starling 2 실기 파라미터 추출 (Mac 경유)
+- [x] HITL config에서 로터 배치, IMU 오프셋 등 실측치 확보
+- [x] iris 모델을 iris_starling으로 복사 후 물리 파라미터 수정
+- [x] airframe 스크립트 작성 (`4200_gazebo-classic_iris_starling`)
+- [x] CMake 등록 (models 목록 + CMakeLists.txt)
+- [x] 빌드 성공 및 SITL 실행 검증
+- [x] Gazebo GUI에서 이륙/착륙 시각 확인
+- [x] 파라미터 로드 확인 (`CA_ROTOR0_PY=0.25`, `EKF2_IMU_POS_X=0.027`, `IMU_GYRO_RATEMAX=800`)
+- [x] 이미지 스냅샷 (`starling-sitl:day2-airframe`)
+- [x] PX4-Autopilot v1.18-beta 오염 복구 및 v1.14.0 재고정
+- [x] `git remote remove origin`으로 자동 업데이트 재발 방지
 
-**성공 기준**: 실측 정밀 재현은 아니지만, flight_code의 미션 경로가 벽에 부딪히지 않는 수준의 공간 확보
+**성공 기준**: iris보다 실기에 가까운 물리로 SITL이 정상 동작 → 달성  
+**저널**: [day2_journal.md](day2_journal.md)
 
-### Day 3 (7/30): flight_code 실전 검증
+### Day 3 (다음 세션): flight_code의 SITL 대응
 
-- [ ] flight_code에 SITL 모드 추가
-  - [ ] `voxl_pose_reader`와 병렬로 `sim_pose_reader` (MAVSDK 기반) 함수 작성
-  - [ ] CLI 플래그 `--sim` 또는 환경변수로 두 리더 중 선택
-  - [ ] 실기 코드 경로는 100% 그대로 유지
+- [ ] `voxl_pose_reader` 함수의 SITL 버전 작성 (MAVSDK telemetry 기반)
+- [ ] CLI 플래그 `--sim` 또는 환경변수로 두 리더 중 선택
+- [ ] 실기 코드 경로는 100% 그대로 유지
 - [ ] SITL에서 미션 20단계 전체 실행 완료
 - [ ] 트래킹 지표 로깅 (위치 오차, 자세, 속도)
 - [ ] CSV 출력 경로를 SITL 환경에 맞게 조정 (`/home/root/` 하드코딩 우회)
-- [ ] 실기 데이터와 비교 가능한 포맷으로 저장
 
 **성공 기준**: 정량적 비교 가능한 SITL 로그 확보
 
-### Day 4 (7/31): 실기 대조 실험
+### Day 4: 실기 대조 실험
 
 - [ ] 실기 Starling 2에서 같은 미션 실행 (기존 데이터 활용 가능)
 - [ ] 지표 수집 (SITL과 동일 포맷)
@@ -51,7 +57,7 @@
 
 **성공 기준**: SITL 결과와 실기 결과 데이터 세트 준비 완료
 
-### Day 5 (8/1): sim-to-real gap 분석
+### Day 5: sim-to-real gap 분석
 
 - [ ] 양쪽 지표 비교 (위치 오차, 응답 지연, 실패 모드)
 - [ ] 어느 축에서 gap이 큰지 정량화
@@ -72,7 +78,7 @@
 
 ### 별도 트랙 B: QVIX 정밀 재현
 
-이것도 Week 1 밖으로 분리. 실측 방문이 별도로 필요.
+Week 1 밖으로 분리. 실측 방문이 별도로 필요.
 
 - [ ] NextOn 방문 계측 계획 (도면, 선반 치수, 조명, 텍스처)
 - [ ] 재배 선반 CAD 또는 실측 데이터 기반 SDF

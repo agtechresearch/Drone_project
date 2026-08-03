@@ -1,0 +1,47 @@
+#!/bin/sh
+#
+# @name ModalAI Starling 2 (Gazebo SITL)
+#
+# @type Quadrotor Wide
+# @class Copter
+#
+# @maintainer Starling SITL / agtechlab
+#
+
+. ${R}etc/init.d/rc.mc_defaults
+
+# Control Allocation - Starling 2 실측 (HITL config 기준)
+param set-default CA_AIRFRAME 0
+param set-default CA_ROTOR_COUNT 4
+param set-default CA_ROTOR0_PX 0.15
+param set-default CA_ROTOR0_PY 0.25
+param set-default CA_ROTOR0_KM 0.05
+param set-default CA_ROTOR1_PX -0.15
+param set-default CA_ROTOR1_PY -0.19
+param set-default CA_ROTOR1_KM 0.05
+param set-default CA_ROTOR2_PX 0.15
+param set-default CA_ROTOR2_PY -0.25
+param set-default CA_ROTOR2_KM -0.05
+param set-default CA_ROTOR3_PX -0.15
+param set-default CA_ROTOR3_PY 0.19
+param set-default CA_ROTOR3_KM -0.05
+
+# Motor 출력 매핑
+param set-default PWM_MAIN_FUNC1 101
+param set-default PWM_MAIN_FUNC2 102
+param set-default PWM_MAIN_FUNC3 103
+param set-default PWM_MAIN_FUNC4 104
+
+# EKF2 - IMU 오프셋 (Starling 2 실측)
+param set-default EKF2_IMU_POS_X 0.027
+param set-default EKF2_IMU_POS_Y 0.009
+param set-default EKF2_IMU_POS_Z -0.019
+
+# IMU 샘플링 (실기와 동일 800Hz)
+param set-default IMU_GYRO_RATEMAX 800
+
+# MAV_TYPE (Quadrotor)
+param set-default MAV_TYPE 2
+
+# 자동 튜닝 (실기와 동일)
+param set-default MC_AT_EN 1
