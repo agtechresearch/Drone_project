@@ -4,7 +4,7 @@
 
 ## Week 1 (7/28 ~ 8/1) — Baseline & Sim-to-Real Gap
 
-**일정 재조정**: 7/28 Day 1은 예정대로 완료했으나, 8/3에 Day 2를 진행하게 되어 이후 일정이 뒤로 밀렸다. 새 일정은 아래 각 Day 참조.
+**일정 재조정**: 7/28 Day 1 이후, QVIX 정밀 재현 트랙에서 시간 소진(실패)으로 인해 후반 일정이 뒤로 밀렸다. 8/3에 Day 2와 Day 3를 연속 진행. Day 4, 5는 별도 세션.
 
 ### Day 1 (7/28): 시뮬레이션 베이스라인 완성 ✓
 
@@ -38,22 +38,26 @@
 **성공 기준**: iris보다 실기에 가까운 물리로 SITL이 정상 동작 → 달성  
 **저널**: [day2_journal.md](day2_journal.md)
 
-### Day 3 (다음 세션): flight_code의 SITL 대응
+### Day 3 (8/3): flight_code의 SITL 대응 ✓
 
-- [ ] `voxl_pose_reader` 함수의 SITL 버전 작성 (MAVSDK telemetry 기반)
-- [ ] CLI 플래그 `--sim` 또는 환경변수로 두 리더 중 선택
-- [ ] 실기 코드 경로는 100% 그대로 유지
-- [ ] SITL에서 미션 20단계 전체 실행 완료
-- [ ] 트래킹 지표 로깅 (위치 오차, 자세, 속도)
-- [ ] CSV 출력 경로를 SITL 환경에 맞게 조정 (`/home/root/` 하드코딩 우회)
+- [x] `sim_pose_reader` 함수 작성 (MAVSDK telemetry 기반)
+- [x] CLI 플래그 `--sim` 추가
+- [x] `arm_and_start_offboard`에 리더 선택 분기 추가
+- [x] CSV 경로 하드코딩 우회 (SITL/실기 자동 폴백)
+- [x] 실기 코드 경로 무손상 (기존 로직 한 줄도 안 바꿈)
+- [x] SITL에서 미션 20단계 완주 확인
+- [x] CSV 로깅 정상 작동 (실이동 10m 확인)
+- [x] 이미지 스냅샷 (`starling-sitl:day3-complete`, `starling-flight:day3-sim`)
 
-**성공 기준**: 정량적 비교 가능한 SITL 로그 확보
+**성공 기준**: 실기 flight_code가 수정 없는 로직 흐름 그대로 SITL에서 미션 완주 → 달성  
+**저널**: [day3_journal.md](day3_journal.md)
 
-### Day 4: 실기 대조 실험
+### Day 4 (다음 세션): 실기 대조 실험
 
-- [ ] 실기 Starling 2에서 같은 미션 실행 (기존 데이터 활용 가능)
+- [ ] 실기 Starling 2에서 SITL과 동일한 미션 실행
 - [ ] 지표 수집 (SITL과 동일 포맷)
 - [ ] 데이터 정리 및 pair 매칭
+- [ ] 실기 CSV와 SITL CSV의 컬럼 정합성 확인
 
 **성공 기준**: SITL 결과와 실기 결과 데이터 세트 준비 완료
 
@@ -62,6 +66,7 @@
 - [ ] 양쪽 지표 비교 (위치 오차, 응답 지연, 실패 모드)
 - [ ] 어느 축에서 gap이 큰지 정량화
 - [ ] 결과 정리 (표, 그래프, 짧은 리포트)
+- [ ] Day 3의 `mav_abs_n` stale 문제 정리 (SITL에서 `mavsdk_position_monitor` 스킵 옵션)
 
 **성공 기준**: "SITL이 실기의 어떤 부분을 얼마나 재현하는가"에 대한 답
 

@@ -20,14 +20,14 @@
 │  Container A: starling-sitl      │  UDP    │  Container B: starling-flight    │
 │  Ubuntu 22.04                    │  <---> │  Ubuntu 18.04                    │
 │  PX4 v1.14.0 + Gazebo Classic 11 │  14540 │  Python 3.6.9 + MAVSDK 0.12.0    │
-│  Starling 2 airframe (iris_starling) │     │  flight_code                     │
+│  Starling 2 airframe             │        │  flight_code (--sim mode)         │
 │  VNC (GUI 원격 접근)              │         │  mavsdk_server                   │
 └─────────────────────────────────┘         └─────────────────────────────────┘
 ```
 
-- **Container A는 실기 하드웨어(voxl-px4) 대체**
-- **Container B는 실기와 동일한 flight_code 실행 환경**
-- flight_code 관점에서 SITL과 실기는 UDP endpoint만 다름
+- Container A는 실기 하드웨어(voxl-px4) 대체
+- Container B는 실기와 동일한 flight_code 실행 환경
+- **flight_code 관점에서 SITL과 실기는 CLI 플래그 (`--sim`) 유무만 다름**
 
 ## 스택 확정 근거
 
@@ -59,21 +59,39 @@ Day 2에서 iris를 베이스로 Starling 2 실기 스펙을 반영한 `iris_sta
 
 Starling 2 전용 airframe 정의는 ModalAI 리포에 없다. VOXL2는 표준 PX4 airframe 방식이 아니라 `target/voxl-px4-start` 실행 스크립트로 모듈을 로드하는 방식이라, 이 정의를 그대로 이식할 수 없었다. 대신 HITL config의 실측 파라미터를 활용하는 우회 방식으로 진행했다.
 
+## flight_code의 이중 모드 지원 (Day 3)
+
+실기 코드에는 세 곳 추가 편집만 반영. 기존 로직은 한 줄도 안 바뀜.
+
+- **`sim_pose_reader` 함수**: MAVSDK telemetry(`position_velocity_ned`, `attitude_euler`, `attitude_angular_velocity_body`)를 구독해서 `self.voxl_latest[pipe_name]`을 실기와 동일한 dict 형식으로 채움. 도달 판정, CSV 로깅 등 다운스트림 코드는 소스가 실기든 SITL이든 구분하지 못하고 그대로 동작.
+- **`--sim` CLI 플래그**: 이 플래그가 있으면 `sim_pose_reader`, 없으면 원래 `voxl_pose_reader`.
+- **CSV 경로 자동 폴백**: `/home/root`가 없으면 현재 디렉터리. SITL/실기 양쪽 다 자동 대응.
+
+실기 실행 커맨드와 SITL 실행 커맨드의 차이는 `--sim` 플래그 하나뿐:
+
+```bash
+# 실기
+python3 path_flight_phase1_v13.py --csv auto
+
+# SITL
+python3 path_flight_phase1_v13.py --sim --csv auto
+```
+
 ## 현재 진행 상황
 
 `docs/milestones.md`를 참고할 것.
 
 - [x] **Day 1 (7/28)**: 시뮬레이션 베이스라인 구축 완료
 - [x] **Day 2 (8/3)**: Starling 2 airframe 이식 및 SITL 검증 완료
-- [ ] **Day 3**: flight_code의 SITL 대응 (voxl_pose_reader → MAVSDK 버전)
+- [x] **Day 3 (8/3)**: flight_code의 SITL 대응 완료, 미션 20단계 완주 검증
 - [ ] **Day 4**: 실기 대조 실험
 - [ ] **Day 5**: sim-to-real gap 분석
 
 ## 일정 변경 이력
 
 **당초 계획 (7/28 기준)**: 7/28~8/1 5일 내 sim-to-real gap 분석까지 완료  
-**실제 진행**: QVIX 정밀 재현 트랙에서 2일 소진 후 실패 → 우선순위 재조정  
-**현재 계획**: airframe 이식과 flight_code 대응을 먼저 완료, 맵 재현은 별도 트랙(Week 2+)으로 분리
+**실제 진행**: QVIX 정밀 재현 트랙에서 2일 소진 후 실패 → 우선순위 재조정 → 8/3 하루에 Day 2, Day 3 연속 진행  
+**현재 계획**: airframe 이식과 flight_code 대응 완료. 실기 대조와 gap 분석은 별도 세션.
 
 ## 리포 구조
 
@@ -94,13 +112,15 @@ drone_sim/
 │   ├── iris_starling/      # Gazebo 모델 (SDF, model.config)
 │   └── voxl-px4-hitl-set-default-parameters.config  # 실기 HITL config (원본)
 ├── flight_code/            # 실기와 공유하는 비행 로직
-│   └── path_flight_phase1_v13.py
+│   └── path_flight_phase1_v13.py    # --sim 대응 (Day 3)
 ├── logs/                   # 세션별 실행 로그
-│   └── day1/
+│   ├── day1/
+│   └── day3/               # SITL 미션 완주 로그
 └── docs/                   # 셋업 절차, 저널, 마일스톤
     ├── setup.md
     ├── day1_journal.md
     ├── day2_journal.md
+    ├── day3_journal.md
     └── milestones.md
 ```
 
@@ -114,9 +134,9 @@ drone_sim/
 # 호스트에서 컨테이너 시작
 ~/starling_sim/docker/start_all.sh
 
-# Container A 진입 후 SITL 실행
+# Container A 진입 후 VNC와 SITL 실행
 docker exec -it starling-sitl bash
-~/start_vnc.sh                                     # VNC (선택)
+~/start_vnc.sh
 cd ~/PX4-Autopilot
 make px4_sitl gazebo-classic_iris_starling         # Starling 2 airframe으로 SITL 시작
 
@@ -125,7 +145,7 @@ docker exec -it starling-flight bash
 MAVSDK_BIN=/usr/local/lib/python3.6/dist-packages/mavsdk/bin/mavsdk_server
 $MAVSDK_BIN -p 50051 udp://:14540 > ~/mavsdk_server.log 2>&1 &
 cd ~/workspace
-python3 path_flight_phase1_v13.py --csv auto --csv-sample-sec 1.0
+python3 path_flight_phase1_v13.py --sim --csv auto --csv-sample-sec 1.0
 ```
 
 ## 별도 트랙 (Week 1 밖으로 분리한 것들)

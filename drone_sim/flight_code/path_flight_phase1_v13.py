@@ -862,6 +862,125 @@ class DroneController:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 5.0)
 
+    async def sim_pose_reader(self, pipe_names):
+        """SITL-only replacement for voxl_pose_reader.
+
+        The real drone reads position from `voxl-inspect-pose -n <pipe>` subprocess.
+        In SITL there is no such tool. This coroutine subscribes to MAVSDK telemetry
+        streams and fills `self.voxl_latest[pipe_name]` with the exact same dict
+        format that `parse_voxl_inspect_pose_line` produces, so downstream code
+        (wait_reach_pipe_ready, feedback_state, CSV logging, etc.) does not need
+        any modification.
+
+        Because a single MAVSDK subscription can feed all requested pipes with the
+        same simulated data, we take a list of pipe names and populate all of them
+        from one telemetry stream. This mirrors real-drone semantics where
+        `px4_vehicle_local_position` and `vvhub_body_wrt_local` may differ slightly,
+        but in SITL both trace back to the same ground truth.
+        """
+        if not pipe_names:
+            return
+        pipe_list = [p for p in pipe_names if p]
+        if not pipe_list:
+            return
+        log("[sim] starting MAVSDK-based pose reader (SITL mode) for pipes: {}".format(
+            ", ".join(pipe_list)))
+
+        sim_state = {"pv": None, "att": None, "av": None}
+
+        async def _position_task():
+            try:
+                async for pv in self.drone.telemetry.position_velocity_ned():
+                    if not self.monitoring or self.aborted:
+                        break
+                    sim_state["pv"] = pv
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.voxl_reader_errors["_sim_position"] = str(e)
+
+        async def _attitude_task():
+            try:
+                async for att in self.drone.telemetry.attitude_euler():
+                    if not self.monitoring or self.aborted:
+                        break
+                    sim_state["att"] = att
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.voxl_reader_errors["_sim_attitude"] = str(e)
+
+        async def _angular_velocity_task():
+            try:
+                async for av in self.drone.telemetry.attitude_angular_velocity_body():
+                    if not self.monitoring or self.aborted:
+                        break
+                    sim_state["av"] = av
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.voxl_reader_errors["_sim_angular"] = str(e)
+
+        sub_tasks = [
+            asyncio.ensure_future(_position_task()),
+            asyncio.ensure_future(_attitude_task()),
+            asyncio.ensure_future(_angular_velocity_task()),
+        ]
+
+        try:
+            while self.monitoring and not self.aborted:
+                pv = sim_state["pv"]
+                att = sim_state["att"]
+                av = sim_state["av"]
+
+                if pv is not None:
+                    now = asyncio.get_event_loop().time()
+                    unix_now = time.time()
+                    parsed = {
+                        "voxl_ts_ms": unix_now * 1000.0,
+                        "pos_x": pv.position.north_m,
+                        "pos_y": pv.position.east_m,
+                        "pos_z": pv.position.down_m,
+                        "roll_deg": att.roll_deg if att is not None else float("nan"),
+                        "pitch_deg": att.pitch_deg if att is not None else float("nan"),
+                        "yaw_deg": att.yaw_deg if att is not None else float("nan"),
+                        "vel_x": pv.velocity.north_m_s,
+                        "vel_y": pv.velocity.east_m_s,
+                        "vel_z": pv.velocity.down_m_s,
+                        "ang_x": av.roll_rad_s if av is not None else float("nan"),
+                        "ang_y": av.pitch_rad_s if av is not None else float("nan"),
+                        "ang_z": av.yaw_rad_s if av is not None else float("nan"),
+                        "raw": "[sim] MAVSDK telemetry",
+                        "mono_time": now,
+                        "unix_time": unix_now,
+                        "wallclock": wallclock(),
+                    }
+                    for pipe_name in pipe_list:
+                        self.voxl_latest[pipe_name] = parsed
+                        if pipe_name not in self.voxl_initial:
+                            self.voxl_initial[pipe_name] = {
+                                "pos_x": parsed["pos_x"],
+                                "pos_y": parsed["pos_y"],
+                                "pos_z": parsed["pos_z"],
+                                "voxl_ts_ms": parsed["voxl_ts_ms"],
+                                "mono_time": now,
+                            }
+                            log("[sim] {} initial pose: x={:+.3f} y={:+.3f} z={:+.3f}".format(
+                                pipe_name, parsed["pos_x"], parsed["pos_y"], parsed["pos_z"]))
+
+                await asyncio.sleep(0.05)  # 20Hz update
+        except asyncio.CancelledError:
+            raise
+        finally:
+            for t in sub_tasks:
+                if not t.done():
+                    t.cancel()
+            for t in sub_tasks:
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+
     # ---------- recorders ----------
 
     def _append_stage_sample(self):
@@ -1070,8 +1189,14 @@ class DroneController:
         self.stream_task = asyncio.ensure_future(self.setpoint_streamer())
         self.mav_task = asyncio.ensure_future(self.mavsdk_position_monitor())
         self.health_task = asyncio.ensure_future(self.health_monitor())
-        for pipe in self.args.voxl_pipes:
-            self.voxl_tasks.append(asyncio.ensure_future(self.voxl_pose_reader(pipe)))
+        if getattr(self.args, "sim", False):
+            # SITL: single MAVSDK-based reader fills all requested pipe names.
+            self.voxl_tasks.append(asyncio.ensure_future(
+                self.sim_pose_reader(self.args.voxl_pipes)))
+        else:
+            # Real drone: one voxl-inspect-pose subprocess per pipe (original behaviour).
+            for pipe in self.args.voxl_pipes:
+                self.voxl_tasks.append(asyncio.ensure_future(self.voxl_pose_reader(pipe)))
         if self.args.csv:
             self.sync_csv_task = asyncio.ensure_future(self.sync_csv_sampler())
 
@@ -1976,7 +2101,11 @@ class DroneController:
         path = self.args.csv
         if path == "auto":
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            path = "/home/root/px4_reach_sync_custom_v13_{}.csv".format(stamp)
+            # Prefer real-drone default path when writable, else fall back to current directory (SITL).
+            default_dir = "/home/root"
+            if not os.path.isdir(default_dir) or not os.access(default_dir, os.W_OK):
+                default_dir = os.getcwd()
+            path = os.path.join(default_dir, "px4_reach_sync_custom_v13_{}.csv".format(stamp))
         try:
             if not self.sync_samples:
                 self._append_sync_csv_sample()
@@ -2147,6 +2276,10 @@ def build_arg_parser():
     p.add_argument("--reach-pipe", default="px4_vehicle_local_position",
                    help="Pose pipe used for reached/not-reached judgement. Recommended: px4_vehicle_local_position")
     p.add_argument("--reach-pipe-timeout", type=float, default=8.0)
+    p.add_argument("--sim", action="store_true",
+                   help="Use MAVSDK telemetry instead of voxl-inspect-pose for reach judgement. "
+                        "Intended for SITL where voxl-inspect-pose is not available. "
+                        "The real-drone code path is untouched.")
     p.add_argument("--csv", default="", help="Write synchronized CSV. Use 'auto' or a path. Default: disabled")
     p.add_argument("--csv-sample-sec", type=float, default=DEFAULT_CSV_SAMPLE_SEC)
     p.add_argument("--voxl-pipes", nargs="*", default=["px4_vehicle_local_position", "vvhub_body_wrt_local"],
