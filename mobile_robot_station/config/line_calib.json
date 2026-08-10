@@ -1,0 +1,29 @@
+{
+  "line_sample_px": 532,
+  "line_gray_median": 142.0,
+  "hsv_lower": [
+    20,
+    47,
+    142
+  ],
+  "hsv_upper": [
+    25,
+    64,
+    158
+  ],
+  "lab_lower": [
+    144,
+    126,
+    140
+  ],
+  "lab_upper": [
+    159,
+    128,
+    144
+  ],
+  "floor_sample_px": 2337,
+  "floor_gray_median": 76.0,
+  "gray_gap": -66.0,
+  "dark_offset": 5,
+  "mode": "dark"
+}

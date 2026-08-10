@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+<launch>
+  <arg name="map_file" default="/home/er/autonomous_nav/maps/current_map.yaml"/>
+  <arg name="rviz" default="true"/>   <!-- false면 RViz 미실행 (터치 UI에서 버튼으로 켬) -->
+
+  <!-- 지도 서버 -->
+  <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)" output="screen">
+    <param name="frame_id" value="map"/>
+  </node>
+
+  <!-- AMCL 위치 추정 -->
+  <node pkg="amcl" type="amcl" name="amcl" output="screen">
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/amcl.yaml" command="load"/>
+    <param name="initial_pose_x" value="0"/>
+    <param name="initial_pose_y" value="0"/>
+    <param name="initial_pose_a" value="0"/>
+
+    <!-- 메카넘 휠 = 홀로노믹: diff → omni 로 변경 (핵심 수정) -->
+    <param name="odom_model_type"    value="omni"/>
+    <!-- 직렬포트 지연을 허용하도록 AMCL TF 허용 오차 증가 -->
+    <param name="transform_tolerance" value="1.5"/>
+    <!-- 초기 위치 불확실성 축소 (기본 1.0m → 0.5m) -->
+    <param name="initial_cov_xx"     value="0.25"/>
+    <param name="initial_cov_yy"     value="0.25"/>
+    <param name="initial_cov_aa"     value="0.068"/>
+    <!-- 파티클 범위 -->
+    <param name="min_particles"      value="500"/>
+    <param name="max_particles"      value="3000"/>
+    <!-- 위치추정 드리프트 완화 (2026-07-13): 메카넘 회전 슬립으로 오도 회전오차↑
+         → 오도 과신 완화(alpha↑) + 보정 빈도↑(update_min↓). 정지 중 떨림 심하면 되돌릴 것 -->
+    <param name="odom_alpha2"        value="0.4"/>   <!-- 0.3→0.4 이동 중 회전추정 노이즈 -->
+    <param name="odom_alpha4"        value="0.25"/>  <!-- 0.1→0.25 회전기인 이동오차(슬립) -->
+    <param name="update_min_d"       value="0.10"/>  <!-- 0.15→0.10 더 자주 필터 갱신 -->
+    <param name="update_min_a"       value="0.15"/>  <!-- 0.2→0.15 -->
+  </node>
+
+  <!-- move_base: 경로 계획 + 장애물 회피 -->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/costmap_common_params.yaml"
+              command="load" ns="global_costmap"/>
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/costmap_common_params.yaml"
+              command="load" ns="local_costmap"/>
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/local_costmap_params.yaml"
+              command="load"/>
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/global_costmap_params.yaml"
+              command="load"/>
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/base_global_planner_params.yaml"
+              command="load" ns="move_base"/>
+    <!-- 로컬 플래너: 벤더 표준 TrajectoryPlannerROS 파라미터 (제자리회전 0.25 + 이동중 회전 0.1
+         + holonomic_robot:false). "제자리 회전으로 방향 맞춤 → 거의 직진"이라 이 로봇의 저속
+         메카넘 mix 데드밴드 문제를 피함. DWA+메카넘 횡이동(vy) 방식은 제거함 (2026-07-10 규명). -->
+    <rosparam file="$(find myagv_navigation)/param/base_local_planner_param/base_local_planner_params.yaml"
+              command="load"/>
+    <!-- 코스트맵 버그 수정 (마지막 로드로 앞선 파라미터 덮어쓰기) -->
+    <rosparam file="/home/er/autonomous_nav/config/navigation_overrides.yaml" command="load"/>
+
+    <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+    <param name="base_local_planner"  value="base_local_planner/TrajectoryPlannerROS"/>
+
+    <!-- TF 허용 오차: 직렬 포트 갭으로 인한 ~1초 지연 허용 -->
+    <param name="transform_tolerance" value="2.0"/>
+
+    <!-- 회전 복구는 Cost:-1 상황에서 항상 실패하므로 비활성화 -->
+    <!-- clear_costmap 복구만 사용 -->
+    <param name="recovery_behavior_enabled" value="true"/>
+    <rosparam param="recovery_behaviors">
+      - {name: conservative_reset, type: clear_costmap_recovery/ClearCostmapRecovery}
+      - {name: aggressive_reset,   type: clear_costmap_recovery/ClearCostmapRecovery}
+    </rosparam>
+    <param name="conservative_reset/reset_distance" value="3.0"/>
+    <param name="aggressive_reset/reset_distance"   value="0.0"/>
+
+    <!-- 플래너 타임아웃 및 진동 감지 -->
+    <param name="planner_frequency"          value="1.0"/>
+    <param name="controller_frequency"       value="5.0"/>
+    <param name="planner_patience"           value="10.0"/>
+    <param name="controller_patience"        value="20.0"/>
+    <param name="oscillation_timeout"        value="20.0"/>
+    <param name="oscillation_distance"       value="0.1"/>
+  </node>
+
+  <!-- RViz (VNC 화면에 표시, SSH 환경에서는 닫아도 무방). rviz:=false 로 끌 수 있음 -->
+  <group if="$(arg rviz)">
+    <node pkg="rviz" type="rviz" name="rviz"
+          args="-d $(find myagv_navigation)/rviz/dwa.rviz"
+          launch-prefix="bash -c 'DISPLAY=:0 $0 $@'"/>
+  </group>
+
+</launch>

@@ -1,0 +1,18 @@
+# 자율주행 웨이포인트 설정 파일
+# save_waypoint.sh 로 자동 생성/수정됩니다.
+
+waypoints:
+  - name: "Room1"
+    x: -0.2984
+    y: -0.1077
+    yaw: 176.1
+    wait: 2.0
+    timeout: 60.0
+
+  - name: "예냉실"
+    x: 3.0005
+    y: -0.5316
+    yaw: 97.1
+    wait: 2.0
+    timeout: 60.0
+

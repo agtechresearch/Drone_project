@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- 1. gmapping SLAM -->
+  <include file="$(find myagv_navigation)/launch/gmapping.launch"/>
+  <!-- 2. move_base -->
+  <node pkg="move_base" type="move_base" name="move_base" output="screen" respawn="false">
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/costmap_common_params.yaml"
+              command="load" ns="global_costmap"/>
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/costmap_common_params.yaml"
+              command="load" ns="local_costmap"/>
+    <rosparam file="/home/er/autonomous_nav/config/explore_global_costmap.yaml" command="load"/>
+    <rosparam file="/home/er/autonomous_nav/config/explore_local_costmap.yaml"  command="load"/>
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/dwa_local_planner_params.yaml"
+              command="load"/>
+    <rosparam file="/home/er/autonomous_nav/config/mecanum_dwa_params.yaml" command="load"/>
+    <rosparam file="$(find myagv_navigation)/param/dwa_local_planner_param/base_global_planner_params.yaml"
+              command="load" ns="move_base"/>
+    <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+    <param name="base_local_planner"  value="dwa_local_planner/DWAPlannerROS"/>
+    <param name="DWAPlannerROS/xy_goal_tolerance"  value="0.3"/>
+    <param name="DWAPlannerROS/yaw_goal_tolerance" value="0.5"/>
+  </node>
+  <!-- 3. explore_lite -->
+  <node pkg="explore_lite" type="explore" name="explore" output="screen">
+    <rosparam file="/home/er/autonomous_nav/config/explore.yaml" command="load"/>
+  </node>
+  <!-- RViz 제거 (CPU 부하 감소) -->
+</launch>

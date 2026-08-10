@@ -1,0 +1,15 @@
+# explore_lite 파라미터
+# frontier-based 자율 탐색 설정
+
+robot_base_frame: base_footprint
+costmap_topic: map
+costmap_updates_topic: map_updates
+visualize: true                 # RViz에서 frontier 시각화
+
+planner_frequency: 0.5          # frontier 재계산 주기 (Hz)
+progress_timeout: 20.0          # 진행 없으면 다른 frontier로 (초)
+transform_tolerance: 0.5
+
+potential_scale: 3.0            # 목표 거리 가중치
+gain_scale: 1.0                 # frontier 크기 가중치 (클수록 넓은 미지역 선호)
+min_frontier_size: 0.5          # 최소 frontier 크기 (m), 너무 작으면 무시
