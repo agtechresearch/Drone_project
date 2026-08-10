@@ -9,3 +9,4 @@
 | [`bee35_programing/`](bee35_programing/) | **Bee35** — 정렬(align)·loiter 비행 실험 및 로그 분석 |
 | [`advancedroneprograming/`](advancedroneprograming/) | **Tello** — 얼굴 추적, 핸드 제스처 제어, 영상 기록 |
 | [`drone_sim/`](drone_sim/) | 시뮬레이션 환경 및 이륙 스크립트 |
+| [`mobile_robot_station/`](mobile_robot_station/) | **모바일 로봇 (myAGV)** — 이동형 드론 스테이션·딸기 적재용 메카넘 로봇 자율주행. gmapping SLAM + AMCL + move_base (RPi4B, ROS Noetic) |

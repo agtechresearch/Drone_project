@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.pyc
+
+# 런타임 로그
+logs/
+
+# 임시/스크래치
+scratchpad/
