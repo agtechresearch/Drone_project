@@ -1,0 +1,16 @@
+	set(worlds
+		none
+		baylands
+		empty
+			qvix
+		ksql_airport
+		mcmillan_airfield
+		sonoma_raceway
+		warehouse
+		windy
+		yosemite
+	)
+
+	# find corresponding airframes
+	file(GLOB gazebo-classic_airframes
+		RELATIVE ${PX4_SOURCE_DIR}/ROMFS/px4fmu_common/init.d-posix/airframes

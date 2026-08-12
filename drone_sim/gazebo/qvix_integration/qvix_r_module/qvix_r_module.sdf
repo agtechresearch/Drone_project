@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="qvix_r_module">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://qvix_r_module/meshes/qvix_r_full.stl</uri>
+            <scale>0.001 0.001 0.001</scale>
+          </mesh>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://qvix_r_module/meshes/qvix_r_full.stl</uri>
+            <scale>0.001 0.001 0.001</scale>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1</ambient>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>
