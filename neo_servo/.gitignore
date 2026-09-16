@@ -1,0 +1,11 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# 런타임 로그 (main.py / battery_test.py 실행 시 생성)
+logs/
+
+# 디버그 프레임 캡처 (vision.py 디버그 출력)
+debug/

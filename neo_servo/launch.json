@@ -1,0 +1,35 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Calibrate: capture (순차 캡처)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/calibrate.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Calibrate: track (실시간 좌표 표시)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/calibrate.py",
+            "args": ["--mode", "track"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Main: dry-run (비전만 확인)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": ["--dry-run"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Main: 실비행",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal"
+        }
+    ]
+}

@@ -1,0 +1,118 @@
+# ============================================================
+# DJI Neo Visual Servo — 통합 설정
+# 폰/앱 UI 좌표는 scrcpy 창 기준 상대 좌표(픽셀).
+# 폰 바뀌면 phone.window_size와 ui_layout만 다시 잡으면 됨.
+# ============================================================
+
+# ---------- 프레임 소스 ----------
+source:
+  type: scrcpy          # 'scrcpy' 또는 'rtmp'
+  scrcpy:
+    camera_index: 0     # OBS 가상카메라 인덱스
+    fps: 30
+    # OpenCV가 카메라 드라이버에 요청할 해상도. 명시 안 하면 640x480으로 열림.
+    # OBS의 캔버스/출력 해상도와 일치시켜야 downscale 없이 원본 캡처.
+    width: 2960
+    height: 1440
+  rtmp:
+    url: "rtmp://127.0.0.1:1935/live/neo"
+    buffer_size: 1      # 저지연: 반드시 1
+
+# ---------- 폰(scrcpy 창) ----------
+# 갤럭시 노트9. 실측 창 크기 (start_scrcpy.bat 실행 후 확인한 값)
+# 이 값은 강제 리사이즈에 쓰이지 않고, UI 좌표가 어느 창 크기 기준인지 문서화용.
+# 실제 창 크기가 이 값과 다르면 실행 시 경고 로그.
+phone:
+  window_title: "NoteNine"
+  window_size: [2232, 1119]
+
+# ---------- DJI Fly 앱 UI 좌표 (scrcpy 사용 시) ----------
+# ★ 노트9 + 위 window_size로 캘리브레이션 필요 — 아래는 이전 폰 기준의 잔존값
+# 캘리브레이션 방법: scrcpy 창 띄우고 DJI Fly 이륙대기 화면에서
+#   각 요소에 마우스 올려 화면좌표 확인 → scrcpy 창 좌상단 좌표를 빼서 상대좌표 계산
+ui_layout:
+  left_stick_center:     [508, 830]
+  right_stick_center:    [1721, 831]
+  takeoff_button:        [308, 233]
+  takeoff_confirm:       [1116, 530]
+  landing_button:        [308, 233]
+  capture_button:        [1937, 230]
+  stick_radius:          207
+  mask_regions: []
+  # AprilTag 탐지 시 무시할 UI 영역 [x, y, w, h].
+  # 현재 비활성화 — AprilTag는 오탐지가 거의 없어서 마스킹 없이 시작.
+  # 오탐지가 실제로 생기면 두 가지 방식 중 선택:
+  #   (a) UI 영역 열거 (아래 형식). scrcpy 창에서 좌표 실측 필요.
+  #   (b) 화이트리스트 방식: main.py에서 중앙 프리뷰 영역만 남기는 마스크 생성.
+  # 예시:
+  #   - [0, 0, 1344, 60]      # 상단 상태바
+  #   - [0, 577, 1344, 100]   # 하단 촬영/모드 버튼
+  #   - [235, 370, 240, 240]  # 좌측 조이스틱 (중심±반경 기준)
+  #   - [935, 370, 240, 240]  # 우측 조이스틱
+
+# ---------- AprilTag ----------
+apriltag:
+  family: "tag36h11"          # 사용하던 계열
+  target_size_px: 100         # 정렬 완료 판단 기준 마커 크기(px)
+  target_pos_ratio: [0.5, 0.33]   # 화면 내 목표 위치 비율 (x, y)
+  detector:
+    nthreads: 2
+    quad_decimate: 2.0        # 원본 해상도(2960x1440) 사용 시 2.0 권장.
+                              # 내부 처리는 절반 크기지만 최종 코너는 원본에서 refine.
+                              # 처리 부담을 낮추면서 정밀도는 원본 정보 활용.
+                              # 성능 여유 있으면 1.0으로 낮춰 최고 정밀도 가능.
+    quad_sigma: 0.0
+    refine_edges: 1
+    decode_sharpening: 0.25
+
+# ---------- 마커 물리 정보 ----------
+marker:
+  physical_size_mm: 60        # AprilTag 검은 사각형 외곽 실측 크기 (mm)
+
+# ---------- 카메라 캘리브레이션 ----------
+# calibrate_camera.py로 실측 후 갱신.
+# focal_length_px = 화면_마커크기(px) × 실측_거리(mm) / marker.physical_size_mm
+camera:
+  focal_length_px: 1553.1       # ★ null이면 아직 미측정. 캘리브레이션 후 값 채움
+
+# ---------- 제어 파라미터 ----------
+control:
+  vision_hz: 30               # 비전 스레드 주기
+  loop_hz:   20               # 컨트롤 스레드 주기 (스틱 갱신)
+
+  # PID 게인 — BEE35보다 훨씬 보수적으로. 지연 체인 때문.
+  # 실기 튜닝 순서: kp_x 먼저 → kp_dist → kp_y
+  pid:
+    kp_x:    0.15             # 좌우: dx(px) → 우스틱 x 오프셋(px)
+    kp_y:    0.20             # 상하: dy(px) → 좌스틱 y 오프셋(px)
+    kp_dist: 0.30             # 거리: size_err(px) → 우스틱 y 오프셋(px)
+
+  # 부호 반전 (실기 확인 필요)
+  # 스틱 좌표계와 카메라 좌표계 부호가 맞지 않으면 여기서 -1로 바꿈
+  sign:
+    x:    1
+    y:    1
+    dist: -1                  # size_err > 0(마커가 큼) → 후진(스틱 +y) 관례에 따라 조정
+
+  # 허용 오차 (정렬 완료 판단)
+  tolerance:
+    pos_px:  40
+    size_px: 10
+
+  # 축 스위칭: dy(고도 오차)가 이 값 넘으면 좌스틱(고도)만 활성화
+  altitude_priority_threshold: 60
+
+# 임무 설정은 mission.yaml에서 관리 (waypoints, 안전정책, 트리거 등)
+
+# ---------- 비상 정지 ----------
+# 지정 핫키가 눌리면 어느 창이 포커스든 즉시 스틱 해제 + 프로그램 종료.
+# Neo는 스틱을 놓으면 자체 비전 포지셔닝으로 호버하므로 그 자리에서 멈춤.
+# pynput 문법: 단일키 '<f12>', 조합 '<ctrl>+<shift>+q' 등
+# 노트북에서 F12가 Fn 조합인 경우 '<esc>' 또는 '<ctrl>+q' 같은 조합으로 변경 권장.
+emergency:
+  hotkey: "<esc>"
+
+# ---------- 로깅 ----------
+logging:
+  log_dir: "./logs"
+  log_prefix: "neo_servo"
