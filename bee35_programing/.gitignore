@@ -1,0 +1,8 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# 비행 영상 — 용량이 커서 리포에 넣지 않음 (연구실 드라이브 보관, cigr2026/README.md 참조)
+*.mp4

@@ -26,8 +26,9 @@ cigr2026/
 
 ## 비행 영상
 
-비행 영상 mp4(29개, 약 640 MB)는 용량 때문에 리포에 넣지 않았다.
-연구실 공유 드라이브에 보관 예정. 원본은 실험 PC의 `BEE35_cigr/cigr_poster/` 아래 같은 경로에 있다.
+비행 영상 mp4(29개, 약 640 MB)는 용량 때문에 리포에 넣지 않았다 (`../.gitignore`의 `*.mp4`).
+연구실 공유 드라이브에 보관 예정. 원본은 실험 PC의 이 폴더 안, 아래 경로에 CSV와 함께 있다.
+`test16/poster/logs_poster/`, `logs_baseline_poster/`는 `poster/`, `baseline_poster/` 영상의 중복 사본이다.
 
 - `logs/`: `flight_video_v6~v13_*_visualized.mp4` (6개)
 - `test16/v16/`: `flight_video_v16_20260617_*.mp4` (6개)
