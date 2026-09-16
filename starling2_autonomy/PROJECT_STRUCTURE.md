@@ -160,7 +160,8 @@ Drone_project/starling2_autonomy/
 │   ├── 04_geofence_voa_investigation.md  지오펜스·VOA 조사(공식문서+기체실측)
 │   ├── 05_v14_geofence.md             v14 지오펜스 복구 설계·검증
 │   ├── 06_modalai_github_org.md       ModalAI GitHub 44개 전수 정리
-│   └── 07_voxl_sdk_gitlab.md          VOXL SDK(GitLab) 93개 + docs.modalai.com
+│   ├── 07_voxl_sdk_gitlab.md          VOXL SDK(GitLab) 93개 + docs.modalai.com
+│   └── guide/                         Starling 2 메인 가이드·기술 문서 (md + 작성본 docx/pdf)
 ├── flight/                ← 비행 코드 원본 (기체에 배포되는 실체)
 │   ├── path_flight_phase1_v14.py      현행 메인 코드
 │   ├── mpa_point_cloud.py             voa_pc_out 구독기 (라이브러리 겸 진단 CLI)
