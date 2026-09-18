@@ -56,6 +56,7 @@ ModalAI **Starling 2**(온보드 VOXL2) 드론에 **장애물 회피 · 안전�
 | [`docs/06`](docs/06_modalai_github_org.md) | ModalAI GitHub 저장소 44개 전수 정리 + 기체 펌웨어 커밋 특정 |
 | [`docs/07`](docs/07_voxl_sdk_gitlab.md) | VOXL SDK(GitLab) 93개 + 와이어포맷 + 공식 회피 파라미터 |
 | [`docs/08`](docs/08_voa_pc_parser.md) | `voa_pc_out` 파서 구현·검증·한계 + 기체 실측 절차 |
+| [`docs/09`](docs/09_marker_drift_experiment_plan.md) | 마커 기반 드리프트 측정 실험계획서 (연구실 3조건 + 현장 2단계 골격) |
 | [`docs/guide/`](docs/guide/) | Starling 2 **메인 가이드**(실사용) · **기술 문서**(시스템 구조·SW 스택). md 원본 + `_작성본` docx/pdf |
 
 날짜별 작업 기록은 [`worklog/`](worklog/).
