@@ -161,6 +161,9 @@ Drone_project/starling2_autonomy/
 │   ├── 05_v14_geofence.md             v14 지오펜스 복구 설계·검증
 │   ├── 06_modalai_github_org.md       ModalAI GitHub 44개 전수 정리
 │   ├── 07_voxl_sdk_gitlab.md          VOXL SDK(GitLab) 93개 + docs.modalai.com
+│   ├── 08_voa_pc_parser.md            voa_pc_out 파서
+│   ├── 09_marker_drift_experiment_plan.md  마커 드리프트 실험계획서 (+ _brief.md 랩미팅 요약)
+│   ├── 10_drone_survey_marker_drift.md     기체 실측 조사 2026-09-23
 │   └── guide/                         Starling 2 메인 가이드·기술 문서 (md + 작성본 docx/pdf)
 ├── flight/                ← 비행 코드 원본 (기체에 배포되는 실체)
 │   ├── path_flight_phase1_v14.py      현행 메인 코드
@@ -173,7 +176,7 @@ Drone_project/starling2_autonomy/
 └── analysis/              ← 단위테스트·분석 산출물
     ├── test_geofence_v14.py           v14 지오펜스 25항목 검증
     ├── test_mpa_point_cloud.py        포인트클라우드 파서 60항목 검증
-    ├── test_marker_drift.py           마커 드리프트 파이프라인 65항목 검증 (venv 필요)
+    ├── test_marker_drift.py           마커 드리프트 파이프라인 70항목 검증 (venv 필요)
     └── marker_drift/                  docs/09 후처리 패키지: coverage·calibrate·detect·noise·analyze·compare
         ├── README.md                  사용법·좌표계·손 촬영 검증 절차
         └── layouts/lab_default.yaml   기본 마커 배치 (설치 후 실측값으로 갱신)

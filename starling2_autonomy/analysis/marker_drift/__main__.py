@@ -29,6 +29,8 @@ def cmd_analyze(args):
 
     if args.log_format == "v14":
         log = logs.load_v14_csv(args.log, pipe=args.pipe, time_source=args.time_source)
+    elif args.log_format == "voxl-logger":
+        log = logs.load_voxl_logger_pose_csv(args.log)
     else:
         log = logs.load_generic_csv(args.log, z_up=args.z_up)
 
@@ -105,7 +107,8 @@ def main(argv=None):
     a = sub.add_parser("analyze", help="검출 CSV + 로그 -> 드리프트 지표")
     a.add_argument("--detections", required=True)
     a.add_argument("--log", required=True)
-    a.add_argument("--log-format", choices=["v14", "generic"], default="v14")
+    a.add_argument("--log-format", choices=["v14", "voxl-logger", "generic"], default="v14",
+                   help="v14: 비행 스크립트 CSV / voxl-logger: run/mpa/px4_vehicle_local_position/data.csv / generic: t,n,e,d,yaw_deg")
     a.add_argument("--pipe", default="px4_vehicle_local_position")
     a.add_argument("--time-source", choices=["pipe", "mono", "unix"], default="pipe")
     a.add_argument("--z-up", action="store_true", help="generic 로그의 d 가 위 양수일 때")

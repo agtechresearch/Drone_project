@@ -95,6 +95,52 @@ def load_generic_csv(path, t="t", n="n", e="e", d="d", yaw="yaw_deg",
     return out.drop_duplicates(subset=["t"], keep="last").sort_values("t").reset_index(drop=True)
 
 
+def load_voxl_logger_pose_csv(path, t_scale=1e-9):
+    """voxl-logger 의 pose_6dof 채널(`-f px4_vehicle_local_position`) data.csv -> 공통 스키마.
+
+    컬럼(기체 실측 2026-09-23, voxl-logger 0.6.1):
+      i,timestamp(ns),T_ch_wrt_par_x(m),T_ch_wrt_par_y(m),T_ch_wrt_par_z(m),roll(rad),pitch(rad),yaw(rad),
+      vel_ch_wrt_par_x(m/s),...,angular_vel_z(rad/s)
+    px4_vehicle_local_position 은 NED 이므로 x,y,z -> n,e,d 그대로. 이륙 전에는 x,y 가 nan 이다(행 제거).
+    timestamp(ns) 는 CLOCK_MONOTONIC. 카메라 data.csv 의 timestamp(ns) 와 같은 시계라 t_offset 없이 맞는다.
+    """
+    # voxl-logger 는 행 끝에 쉼표를 하나 더 찍는다(헤더보다 필드가 1개 많음). index_col=False 가 없으면
+    # pandas 가 첫 컬럼을 인덱스로 삼아 모든 컬럼이 한 칸씩 밀린다.
+    df = pd.read_csv(path, index_col=False)
+    out = pd.DataFrame()
+    out["t"] = _num(df["timestamp(ns)"]) * float(t_scale)
+    out["n"] = _num(df["T_ch_wrt_par_x(m)"])
+    out["e"] = _num(df["T_ch_wrt_par_y(m)"])
+    out["d"] = _num(df["T_ch_wrt_par_z(m)"])
+    out["yaw_deg"] = np.degrees(_num(df["yaw(rad)"]))
+    out["cmd_n"] = out["cmd_e"] = out["cmd_d"] = np.nan   # 명령은 v14 CSV 에만 있다
+    out["stage"] = ""
+    out["phase"] = ""
+    out = out[out["t"] > 0].dropna(subset=["t", "n", "e", "d"])
+    return out.drop_duplicates(subset=["t"], keep="last").sort_values("t").reset_index(drop=True)
+
+
+def load_voxl_logger_ov_csv(path, t_scale=1e-9):
+    """voxl-logger 의 vio 채널(`-v ov`) data.csv -> 자체 지표용 DataFrame.
+
+    컬럼(기체 실측): i,timestamp(ns),T_imu_wrt_vio_x/y/z(m),roll/pitch/yaw(rad),vel_*,angular_vel_*,gravity_vector_*,
+      T_cam_wrt_imu_*,imu_to_cam_*,features,quality,state,error_code
+    반환: t, vio_x, vio_y, vio_z (VIO 자체 프레임, 중력 정렬 아님), vio_yaw_deg, features, quality, state, error_code
+    첫 행은 timestamp -1e9 (미초기화) 로 나오므로 t <= 0 행은 버린다.
+    """
+    df = pd.read_csv(path, index_col=False)
+    out = pd.DataFrame()
+    out["t"] = _num(df["timestamp(ns)"]) * float(t_scale)
+    out["vio_x"] = _num(df["T_imu_wrt_vio_x(m)"])
+    out["vio_y"] = _num(df["T_imu_wrt_vio_y(m)"])
+    out["vio_z"] = _num(df["T_imu_wrt_vio_z(m)"])
+    out["vio_yaw_deg"] = np.degrees(_num(df["yaw(rad)"]))
+    for c in ("features", "quality", "state", "error_code"):
+        out[c] = _num(df[c]) if c in df.columns else np.nan
+    out = out[out["t"] > 0]
+    return out.drop_duplicates(subset=["t"], keep="last").sort_values("t").reset_index(drop=True)
+
+
 def stage_windows(df, name_contains):
     """stage 컬럼에서 name_contains 를 포함하는 구간들의 (t_start, t_end) 리스트."""
     if "stage" not in df.columns:

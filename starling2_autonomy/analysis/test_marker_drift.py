@@ -334,6 +334,36 @@ def test_v14_loader():
     check("stage 창 추출", len(w) == 1 and abs(w[0][0] - 1000.0) < 1e-9, "windows={}".format(w))
 
 
+def test_voxl_logger_loaders():
+    """기체 실측(2026-09-23) voxl-logger 0.6.1 data.csv 헤더 그대로 만든 표본."""
+    pose_hdr = ("i,timestamp(ns),T_ch_wrt_par_x(m),T_ch_wrt_par_y(m),T_ch_wrt_par_z(m),roll(rad),pitch(rad),yaw(rad),"
+                "vel_ch_wrt_par_x(m/s),vel_ch_wrt_par_y(m/s),vel_ch_wrt_par_z(m/s),angular_vel_x(rad/s),angular_vel_y(rad/s),angular_vel_z(rad/s)")
+    pose_rows = ["0,946952682000,nan,nan,1.333,0,0,-0.132,nan,nan,-0.046,nan,nan,nan,",
+                 "1,946962682000,0.10,0.20,-0.60,0,0,1.5707963,0,0,0,0,0,0,",
+                 "2,946972682000,0.11,0.21,-0.61,0,0,1.5707963,0,0,0,0,0,0,"]
+    ov_hdr = ("i,timestamp(ns),T_imu_wrt_vio_x(m),T_imu_wrt_vio_y(m),T_imu_wrt_vio_z(m),roll(rad),pitch(rad),yaw(rad),"
+              "vel_imu_wrt_vio_x(m/s),vel_imu_wrt_vio_y(m/s),vel_imu_wrt_vio_z(m/s),angular_vel_x(rad/s),angular_vel_y(rad/s),"
+              "angular_vel_z(rad/s),gravity_vector_x(m/s2),gravity_vector_y(m/s2),gravity_vector_z(m/s2),T_cam_wrt_imu_x(m),"
+              "T_cam_wrt_imu_y(m),T_cam_wrt_imu_z(m),imu_to_cam_roll_x(rad),imu_to_cam_pitch_y(rad),imu_to_cam_yaw_z(rad),"
+              "features,quality,state,error_code")
+    ov_rows = ["0,-1000000000,0.0000,0.0000,0.0000,-3.1416,0.0000,0.0000,0,0,0,0,0,0,0,0,9.810,0.067,-0.007,-0.015,1.571,1.571,0.000,0,99,1,0",
+               "1,946960000000,0.01,0.02,0.03,0,0,0.1,0,0,0,0,0,0,0,0,9.81,0.067,-0.007,-0.015,1.571,1.571,0,45,87,2,0"]
+    with tempfile.TemporaryDirectory() as td:
+        pp = os.path.join(td, "pose.csv")
+        with open(pp, "w") as f:
+            f.write(pose_hdr + "\n" + "\n".join(pose_rows) + "\n")
+        op = os.path.join(td, "ov.csv")
+        with open(op, "w") as f:
+            f.write(ov_hdr + "\n" + "\n".join(ov_rows) + "\n")
+        pose = logs.load_voxl_logger_pose_csv(pp)
+        ov = logs.load_voxl_logger_ov_csv(op)
+    check("voxl-logger pose: nan 행 제거", len(pose) == 2)
+    check("voxl-logger pose: t = ns * 1e-9", abs(pose["t"].iloc[0] - 946.962682) < 1e-6)
+    check("voxl-logger pose: NED 매핑", abs(pose["n"].iloc[0] - 0.10) < 1e-9 and abs(pose["d"].iloc[0] + 0.60) < 1e-9)
+    check("voxl-logger pose: yaw rad -> deg", abs(pose["yaw_deg"].iloc[0] - 90.0) < 1e-4)
+    check("voxl-logger ov: 미초기화(-1e9) 행 제거", len(ov) == 1 and ov["features"].iloc[0] == 45 and ov["quality"].iloc[0] == 87)
+
+
 def test_layout_and_stats():
     lay = Layout(default_lab_layout())
     check("기본 배치 24개 마커 (0.5 m 간격)", len(lay) == 24)
@@ -407,7 +437,7 @@ def test_cli_analyze_end_to_end():
 
 def main():
     tests = [test_conventions, test_pnp_roundtrip, test_rendered_detection, test_joint_vs_single_small_tags, test_alignment_and_metrics,
-             test_per_frame_pose, test_v14_loader, test_layout_and_stats, test_cli_analyze_end_to_end]
+             test_per_frame_pose, test_v14_loader, test_voxl_logger_loaders, test_layout_and_stats, test_cli_analyze_end_to_end]
     for t in tests:
         print("\n== {} ==".format(t.__name__))
         try:

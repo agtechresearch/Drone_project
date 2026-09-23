@@ -308,15 +308,16 @@ voxl-logger 기록 → 프레임 추출(타임스탬프 포함)
 - 조건당 반복 수 n — 파일럿 3회의 비행 간 표준편차 s 와 Δ 로 산출 (§5.4). Δ 잠정 3 cm
 - H0 허용 기준 — 잠정 5 cm. 판정이 필요할 때만 사용
 
-### `[기체 확인]` (SSH 접속 1회에 묶어서 처리, 모두 읽기 전용)
-1. `voxl-tag-detector` 서비스 상태, 입력 카메라, 태그 패밀리·크기 설정
-2. `voxl-camera-server.conf`의 hires·tracking 해상도와 fps, hires 활성 여부 → §3.2 표로 태그 픽셀 크기 확정
-3. hires intrinsics 캘리브레이션 파일 존재 여부. tracking_front 어안 캘리브레이션 파일 형식
-4. `voxl-logger`로 카메라 + `ov` + `px4_vehicle_local_position` 동시 기록 가능 여부, 출력 형식, 여유 저장 공간
-5. `voxl-vision-hub.conf`의 `en_tag_fixed_frame` 값과 동작 조건
-6. `voxl-inspect-vio`로 현재 VIO quality 기준값, `voxl-inspect-vibration` 진동 등급
-7. SDK 버전, CPU 온도 기준값
-8. 마커 검출률 예비 시험(손으로 든 7 cm 마커, 거리별) + tracking_front 에서 x=0 위치에 태그 0·1 동시 가시 여부 확인
+### `[기체 확인]` — 2026-09-23 조사 완료, 상세는 [`docs/10`](10_drone_survey_marker_drift.md)
+1. ~~`voxl-tag-detector` 상태~~ → 설치됨(0.1.0)·비활성. tracking_front 입력, tag36h11, 어안 보정 포함. **태그 크기가 0.4 m 로 설정돼 있어 0.07 로 변경 필요**
+2. ~~hires·tracking 해상도~~ → `hires_small_color` 1024×768 30 fps, `hires_large_color` 4056×3040 30 fps 항상 흐름. tracking_front 1280×800 30 fps.
+   7 cm 태그 한 변: small **41 px**, large **164 px**, tracking_front 약 65 px → **후처리 기록은 large 권장**(부하 시험 필요)
+3. ~~hires 캘리브레이션~~ → **없음. 체커보드 캘리브레이션 필요.** tracking_front 는 OpenCV FileStorage fisheye(로더 지원)
+4. ~~voxl-logger~~ → 카메라(jpg)+`ov`+`px4_vehicle_local_position`+`imu_apps` 동시 기록 확인. 모든 채널 CLOCK_MONOTONIC → t_offset 0. 여유 61 GB. 로더 `--log-format voxl-logger` 추가
+5. ~~`en_tag_fixed_frame`~~ → false. 실험 중에는 그대로 둔다(켜면 PX4 odometry 에 개입)
+6. ~~VIO·진동 기준값~~ → 벤치 정지 상태라 참고값 아님. 프리플라이트에서 재확인
+7. ~~SDK·CPU~~ → SDK 1.6.3, 40 °C, 사용률 24 %. 기체 파이썬은 3.6 + numpy 만 (**cv2·apriltag 없음** → 온보드 검출은 voxl-tag-detector 경로만 가능)
+8. **손 검출 시험 미실시** → 다음 접속. 태그 인쇄 + `tag_locations.conf` 임시 변경(승인 후) 필요
 
 ---
 
@@ -326,7 +327,7 @@ voxl-logger 기록 → 프레임 추출(타임스탬프 포함)
 |---|---|---|
 | 1 | 본 계획서 검토, 10절 결정 항목 확정 — **완료 (2026-09-23)** | 아니오 |
 | 2 | 후처리 파이프라인 작성 및 손 촬영 영상으로 검증 (`analysis/marker_drift/`) — **작성 완료, 합성 데이터 59항목 검증 (2026-09-23). 손 촬영 검증은 미실시** | 아니오 |
-| 3 | 기체 접속 1회: 10절 `[기체 확인]` 일괄 조사, 필요 시 hires 캘리브레이션 | **예** |
+| 3 | 기체 접속 1회: 10절 `[기체 확인]` 일괄 조사 — **완료 (2026-09-23, docs/10)**. 손 검출 시험·hires 캘리브레이션·large 기록 부하 시험은 다음 접속 | **예** |
 | 4 | 태그 정렬 모듈 작성(tracking_front 검출 → yaw 폐루프) + 단위테스트 | 아니오 |
 | 5 | 미션 코드 v15 = v14 + `align_tag` 단계 + 로거 제어 + 단조시계 컬럼. 지상 arm 테스트 | 예 |
 | 6 | 정렬 허용오차 산정(5.3절), 파일럿 3회/조건, n 산정(5.4절) | 예 |

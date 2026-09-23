@@ -58,6 +58,7 @@ ModalAI **Starling 2**(온보드 VOXL2) 드론에 **장애물 회피 · 안전�
 | [`docs/08`](docs/08_voa_pc_parser.md) | `voa_pc_out` 파서 구현·검증·한계 + 기체 실측 절차 |
 | [`docs/09`](docs/09_marker_drift_experiment_plan.md) | 마커 기반 드리프트 측정 실험계획서 (연구실 3조건 + 현장 2단계 골격) |
 | [`docs/09 brief`](docs/09_marker_drift_experiment_brief.md) | 위 계획서의 랩미팅 보고용 요약 |
+| [`docs/10`](docs/10_drone_survey_marker_drift.md) | 기체 실측 조사 (카메라·캘리브레이션·태그 검출기·voxl-logger 형식·네트워크, 2026-09-23) |
 | [`docs/guide/`](docs/guide/) | Starling 2 **메인 가이드**(실사용) · **기술 문서**(시스템 구조·SW 스택). md 원본 + `_작성본` docx/pdf |
 
 날짜별 작업 기록은 [`worklog/`](worklog/).
@@ -78,7 +79,7 @@ python analysis/test_mpa_point_cloud.py    # voa_pc_out 파서 60항목
 
 # 마커 드리프트 후처리(docs/09)는 numpy·opencv·pupil-apriltags 등이 필요하므로 venv 에서 돈다
 python -m venv .venv && .venv/Scripts/python -m pip install numpy opencv-python pupil-apriltags pandas matplotlib scipy pyyaml
-.venv/Scripts/python analysis/test_marker_drift.py   # 65항목 (합성 렌더링으로 검출기 경로까지 검증)
+.venv/Scripts/python analysis/test_marker_drift.py   # 70항목 (합성 렌더링으로 검출기 경로까지 검증)
 ```
 
 기체에 연결돼 있다면 포인트클라우드를 직접 볼 수 있다.

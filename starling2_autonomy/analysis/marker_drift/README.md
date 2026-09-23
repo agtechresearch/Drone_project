@@ -1,7 +1,7 @@
 # marker_drift — 마커 기반 드리프트 측정 후처리
 
 [`docs/09`](../../docs/09_marker_drift_experiment_plan.md) 실험의 로컬 PC 분석 파이프라인.
-기체 없이 돈다. 단위테스트 65항목은 합성 렌더링 이미지로 실제 검출기 경로까지 검증한다.
+기체 없이 돈다. 단위테스트 70항목은 합성 렌더링 이미지로 실제 검출기 경로까지 검증한다.
 
 ## 설치
 
@@ -10,7 +10,7 @@ cd starling2_autonomy
 python -m venv .venv
 .venv/Scripts/python -m pip install numpy opencv-python pupil-apriltags pandas matplotlib scipy pyyaml   # Windows
 # .venv/bin/python ...                                                                              # Linux/mac
-.venv/Scripts/python analysis/test_marker_drift.py        # 65/65 passed 확인
+.venv/Scripts/python analysis/test_marker_drift.py        # 70/70 passed 확인
 ```
 
 명령은 `analysis/` 폴더에서 `python -m marker_drift <command>` 로 실행한다.
@@ -106,11 +106,15 @@ python -m marker_drift compare out/*_summary.csv --baseline A --delta 0.03 --out
 정면 정렬 yaw = 광축을 수평면에 투영해 +y 에서 +x 쪽으로 잰 각. **0 = 벽 정면, 양수 = 오른쪽으로 돌아감.**
 PnP 는 `cv2.SOLVEPNP_IPPE_SQUARE` (코너 순서 좌하·우하·우상·좌상 = AprilTag 순서).
 
-## 기체 확인 후 손볼 곳
+## 기체 실측 반영 (2026-09-23, docs/10)
 
-- `detect --timestamps`: voxl-logger 의 카메라 타임스탬프 파일 형식(컬럼명·단위)에 맞춰 `--ts-col/--ts-scale`.
-- `logs.load_generic_csv`: voxl-logger 의 `ov` / `px4_vehicle_local_position` 기록을 CSV 로 바꾼 뒤 컬럼 매핑.
-- hires intrinsics 파일 유무. 없으면 ② 로 만든다.
+- voxl-logger 기록은 `run/mpa/<pipe>/data.csv` + `00000.jpg…` 형식. 카메라 CSV 컬럼 `i,timestamp(ns),gain,exposure(ns),format,height,width,frame_id,reserved`
+  → `detect --frames-dir .../hires_large_color --timestamps .../hires_large_color/data.csv --ts-col "timestamp(ns)" --ts-scale 1e-9`
+- 포즈는 `analyze --log .../px4_vehicle_local_position/data.csv --log-format voxl-logger` (`logs.load_voxl_logger_pose_csv`).
+  `ov/data.csv` 는 `logs.load_voxl_logger_ov_csv` 로 quality·features 를 읽는다. 모든 채널이 CLOCK_MONOTONIC 이라 `--t-offset 0`.
+- 명령 setpoint 는 voxl-logger 에 없으므로 경로 이탈 d(t) 가 필요하면 v14 CSV 를 `--log-format v14` 로 쓴다.
+- hires 캘리브레이션 파일은 기체에 **없다**. `hires_large_color` 로 체커보드를 기록해 ② 로 만든다.
+- 해상도: `hires_small_color` 1024×768 → 7 cm 태그 41 px, `hires_large_color` 4056×3040 → 164 px. 후처리는 large 권장.
 - 카메라-기체 중심 오프셋은 yaw 가 일정한 비행에서는 상수 평행이동으로 정합에 흡수된다. yaw 가 크게 변하는
   비행을 분석하려면 `drift.py` 에 lever-arm 보정을 추가한다.
 
