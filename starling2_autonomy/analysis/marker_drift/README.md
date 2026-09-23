@@ -1,7 +1,7 @@
 # marker_drift — 마커 기반 드리프트 측정 후처리
 
 [`docs/09`](../../docs/09_marker_drift_experiment_plan.md) 실험의 로컬 PC 분석 파이프라인.
-기체 없이 돈다. 단위테스트 59항목은 합성 렌더링 이미지로 실제 검출기 경로까지 검증한다.
+기체 없이 돈다. 단위테스트 65항목은 합성 렌더링 이미지로 실제 검출기 경로까지 검증한다.
 
 ## 설치
 
@@ -10,7 +10,7 @@ cd starling2_autonomy
 python -m venv .venv
 .venv/Scripts/python -m pip install numpy opencv-python pupil-apriltags pandas matplotlib scipy pyyaml   # Windows
 # .venv/bin/python ...                                                                              # Linux/mac
-.venv/Scripts/python analysis/test_marker_drift.py        # 59/59 passed 확인
+.venv/Scripts/python analysis/test_marker_drift.py        # 65/65 passed 확인
 ```
 
 명령은 `analysis/` 폴더에서 `python -m marker_drift <command>` 로 실행한다.
@@ -34,8 +34,8 @@ python -m marker_drift coverage --standoff 0.5 --altitude 0.6 --tag-size 0.10 # 
 python -m marker_drift coverage --intrinsics hires.yaml --layout my.yaml --standoff 0.5 --altitude 2.0 -v
 ```
 
-기본 배치(7 cm, 1 m 간격, 이격 50 cm, 120° 화각, 1280×800) 결과: 경로 100 %에서 태그 1개 이상, 71 %에서 2개 이상,
-한 변 52 px(벽이 화상면과 평행해 위치와 무관). 화각이 94°로 줄면 마커 사이 중간에 빈 구간이 생긴다.
+기본 배치(7 cm, 0.5 m 간격, 이격 50 cm, 120° 화각, 1280×800) 결과: 경로 100 %에서 태그 2개 이상, 93 %에서 3개 이상,
+한 변 52 px(벽이 화상면과 평행해 위치와 무관). 1 m 간격이면 2개 이상은 71 %로 떨어진다.
 
 **태그 2개 이상이 보이는 프레임은 한 몸 PnP**(`geometry.solve_multi_tag_camera_pose`, `joint_*` 컬럼)로 푼다.
 7 cm 태그 하나짜리 PnP 는 정면 근처에서 yaw 가 최대 1.8° 튀지만(평면 포즈 모호성), 두 태그를 묶으면 0.3° 이내다.

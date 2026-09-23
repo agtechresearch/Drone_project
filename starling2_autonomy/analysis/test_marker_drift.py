@@ -126,7 +126,7 @@ def test_pnp_roundtrip():
     cases = [
         ((0.30, -0.50, 0.60), (4.0, 1.5, -1.0), 0),
         ((2.70, -0.55, 0.62), (-3.0, -2.0, 0.5), 3),
-        ((5.40, -0.48, 2.02), (1.0, 0.0, 0.0), 16),
+        ((5.40, -0.48, 2.02), (1.0, 0.0, 0.0), 31),
         ((1.00, -1.20, 0.60), (0.0, 0.0, 0.0), 1),
     ]
     for pos, att, tid in cases:
@@ -196,7 +196,7 @@ def test_joint_vs_single_small_tags():
     single_errs, joint_errs = [], []
     for yaw in (-4.0, -1.5, 0.0, 1.5, 4.0):
         R_true = cam_facing_wall(yaw, 0.5, -0.5)
-        p_true = np.array([0.5, -0.5, 0.6])  # 태그 0 과 1 사이 -> 둘 다 보임
+        p_true = np.array([0.5, -0.5, 0.6])  # 0.5 m 간격이면 태그 0·1·2 가 보임
         img = render_scene(R_true, p_true, layout, intr, 1280, 800)
         rows = [r for r in pose_rows_for_frame(det.detect(img), 0, 0.0, intr, layout) if r["tag_in_layout"] == 1]
         if len(rows) < 2:
@@ -336,10 +336,12 @@ def test_v14_loader():
 
 def test_layout_and_stats():
     lay = Layout(default_lab_layout())
-    check("기본 배치 14개 마커", len(lay) == 14)
-    check("하단열 ID 0~6, 상단열 10~16", lay.ids() == [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16])
-    check("마커 6 은 x=5.5, z=0.6", lay.markers[6]["x"] == 5.5 and lay.markers[6]["z"] == 0.6)
-    check("마커 16 은 x=5.5, z=2.0", lay.markers[16]["x"] == 5.5 and lay.markers[16]["z"] == 2.0)
+    check("기본 배치 24개 마커 (0.5 m 간격)", len(lay) == 24)
+    check("하단열 ID 0~11, 상단열 20~31", lay.ids() == list(range(12)) + list(range(20, 32)))
+    check("마커 11 은 x=5.5, z=0.6", lay.markers[11]["x"] == 5.5 and lay.markers[11]["z"] == 0.6)
+    check("마커 31 은 x=5.5, z=2.0", lay.markers[31]["x"] == 5.5 and lay.markers[31]["z"] == 2.0)
+    lay1 = Layout(default_lab_layout(spacing_m=1.0))
+    check("1 m 간격이면 7개/열, 상단열 10~16", lay1.ids() == [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16])
     yml = os.path.join(HERE, "marker_drift", "layouts", "lab_default.yaml")
     lay2 = Layout.load(yml)
     check("layouts/lab_default.yaml 과 기본 배치 일치",

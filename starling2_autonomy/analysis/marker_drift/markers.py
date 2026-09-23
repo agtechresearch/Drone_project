@@ -21,8 +21,8 @@ from marker_drift import geometry
 LAYOUT_DIR = os.path.join(os.path.dirname(__file__), "layouts")
 
 
-def default_lab_layout(spacing_m=1.0, length_m=5.5, low_z=0.60, high_z=2.00, size_m=0.07):
-    """docs/09 §4.1 기본 배치: 하단열 ID 0~6 (60 cm), 상단열 ID 10~16 (200 cm), 1 m 간격 + 마지막 0.5 m."""
+def default_lab_layout(spacing_m=0.5, length_m=5.5, low_z=0.60, high_z=2.00, size_m=0.07):
+    """docs/09 §4.1 기본 배치(2026-09-23 확정): 0.5 m 간격, 하단열 ID 0~11 (60 cm), 상단열 ID 20~31 (200 cm)."""
     n = int(math.floor(length_m / spacing_m + 1e-9))
     xs = [round(i * spacing_m, 3) for i in range(n + 1)]
     if xs[-1] < round(length_m, 3) - 1e-9:
