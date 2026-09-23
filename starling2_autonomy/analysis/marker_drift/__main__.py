@@ -140,7 +140,7 @@ def main(argv=None):
 
     l = sub.add_parser("layout", help="기본 배치 YAML 생성")
     l.add_argument("--out", default="layout.yaml")
-    l.add_argument("--size", type=float, default=0.15)
+    l.add_argument("--size", type=float, default=0.07)
     l.set_defaults(func=cmd_layout)
 
     args = p.parse_args(argv)

@@ -176,9 +176,40 @@ def test_rendered_detection():
         pos_err = np.linalg.norm(P.mean(axis=0) - p_true)
         yaw_err = abs(geometry.wrap_deg(geometry.circular_mean_deg(yaws) - geometry.camera_yaw_in_M(R_true)))
         spread = float(np.max(np.linalg.norm(P - P.mean(axis=0), axis=1))) if len(P) > 1 else 0.0
-        check("렌더 검출 -> 포즈 {} ({}태그)".format(pos, len(rows)), pos_err < 0.02 and yaw_err < 1.0,
+        check("렌더 검출 -> 태그별 포즈 평균 {} ({}태그, 7 cm)".format(pos, len(rows)), pos_err < 0.03 and yaw_err < 3.0,
               "pos_err={:.4f}m yaw_err={:.2f}deg spread={:.4f}m ids={}".format(
                   pos_err, yaw_err, spread, [r["tag_id"] for r in rows]))
+        if len(rows) >= 2:
+            j = rows[0]
+            jp = np.array([j["joint_x"], j["joint_y"], j["joint_z"]])
+            j_pos_err = np.linalg.norm(jp - p_true)
+            j_yaw_err = abs(geometry.wrap_deg(j["joint_yaw_deg"] - geometry.camera_yaw_in_M(R_true)))
+            check("렌더 검출 -> 한 몸 PnP {} ({}태그)".format(pos, j["joint_n_tags"]), j_pos_err < 0.01 and j_yaw_err < 0.5,
+                  "pos_err={:.4f}m yaw_err={:.2f}deg reproj={:.2f}px".format(j_pos_err, j_yaw_err, j["joint_reproj_px"]))
+
+
+def test_joint_vs_single_small_tags():
+    """7 cm 태그, 정면 근처 yaw 에서 태그 1개 PnP 의 yaw 오차와 한 몸 PnP 의 yaw 오차 비교."""
+    intr = hires_like()
+    layout = Layout.default()
+    det = make_detector()
+    single_errs, joint_errs = [], []
+    for yaw in (-4.0, -1.5, 0.0, 1.5, 4.0):
+        R_true = cam_facing_wall(yaw, 0.5, -0.5)
+        p_true = np.array([0.5, -0.5, 0.6])  # 태그 0 과 1 사이 -> 둘 다 보임
+        img = render_scene(R_true, p_true, layout, intr, 1280, 800)
+        rows = [r for r in pose_rows_for_frame(det.detect(img), 0, 0.0, intr, layout) if r["tag_in_layout"] == 1]
+        if len(rows) < 2:
+            check("joint vs single: 두 태그 검출 (yaw {})".format(yaw), False, "n={}".format(len(rows)))
+            continue
+        for r in rows:
+            single_errs.append(abs(geometry.wrap_deg(r["cam_yaw_deg"] - yaw)))
+        joint_errs.append(abs(geometry.wrap_deg(rows[0]["joint_yaw_deg"] - yaw)))
+    check("한 몸 PnP yaw 오차 최대 < 0.5 deg", joint_errs and max(joint_errs) < 0.5,
+          "joint max={:.2f} mean={:.2f} | single max={:.2f} mean={:.2f} (deg)".format(
+              max(joint_errs) if joint_errs else float("nan"), np.mean(joint_errs) if joint_errs else float("nan"),
+              max(single_errs) if single_errs else float("nan"), np.mean(single_errs) if single_errs else float("nan")))
+    check("한 몸 PnP 가 태그별 PnP 보다 yaw 가 정확", joint_errs and single_errs and np.mean(joint_errs) <= np.mean(single_errs))
 
 
 def synth_flight(delta_true=-90.0, trans_true=(0.8, -1.3, 0.05), drift_per_m=(0.01, -0.02, 0.005),
@@ -373,7 +404,7 @@ def test_cli_analyze_end_to_end():
 
 
 def main():
-    tests = [test_conventions, test_pnp_roundtrip, test_rendered_detection, test_alignment_and_metrics,
+    tests = [test_conventions, test_pnp_roundtrip, test_rendered_detection, test_joint_vs_single_small_tags, test_alignment_and_metrics,
              test_per_frame_pose, test_v14_loader, test_layout_and_stats, test_cli_analyze_end_to_end]
     for t in tests:
         print("\n== {} ==".format(t.__name__))

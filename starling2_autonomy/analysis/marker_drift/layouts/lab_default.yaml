@@ -2,7 +2,7 @@
 # 좌표계 M: x = 마커 열 방향(진행 방향), y = 벽 안쪽(0 = 벽 평면), z = 위. 단위 m.
 name: lab_default
 tag_family: tag36h11
-default_size_m: 0.15            # [결정 필요] 검은 테두리 외곽 기준
+default_size_m: 0.07            # 확정 2026-09-23: 6~7 cm (Bee35 기준 계승), 검은 테두리 외곽 기준
 markers:
   # 하단열: 중심 높이 60 cm (고도 0.6 m 조건)
   - {id: 0,  x: 0.0, z: 0.60}

@@ -20,7 +20,7 @@ from marker_drift import geometry
 LAYOUT_DIR = os.path.join(os.path.dirname(__file__), "layouts")
 
 
-def default_lab_layout(spacing_m=1.0, length_m=5.5, low_z=0.60, high_z=2.00, size_m=0.15):
+def default_lab_layout(spacing_m=1.0, length_m=5.5, low_z=0.60, high_z=2.00, size_m=0.07):
     """docs/09 §4.1 기본 배치: 하단열 ID 0~6 (60 cm), 상단열 ID 10~16 (200 cm), 1 m 간격 + 마지막 0.5 m."""
     xs = []
     x = 0.0
@@ -45,7 +45,7 @@ class Layout:
     def __init__(self, data):
         self.name = data.get("name", "layout")
         self.tag_family = data.get("tag_family", "tag36h11")
-        self.default_size_m = float(data.get("default_size_m", 0.15))
+        self.default_size_m = float(data.get("default_size_m", 0.07))
         self.markers = {}
         for m in data.get("markers", []):
             m = dict(m)

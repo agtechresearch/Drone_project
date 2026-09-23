@@ -22,28 +22,37 @@ from marker_drift import geometry
 def per_frame_pose(det_df):
     """검출 CSV(DataFrame) -> 프레임별 카메라 포즈.
 
-    반환 컬럼: frame, t, n_tags, x, y, z, yaw_deg, spread_m(태그 간 위치 추정 최대 편차), reproj_px(평균), tags
+    반환 컬럼: frame, t, n_tags, x, y, z, yaw_deg, spread_m(태그별 위치 추정 최대 편차), reproj_px, tags, pose_src
+
+    포즈 선택: 프레임에 배치 태그가 2개 이상이고 joint_* 컬럼이 있으면 한 몸 PnP 결과(pose_src="joint"),
+    아니면 태그별 포즈의 평균/원형평균(pose_src="single"). spread_m 은 항상 태그별 포즈에서 계산해
+    마커 좌표 실측 오차의 진단값으로 남긴다.
     """
     d = det_df.copy()
     d = d[d["tag_in_layout"] == 1] if "tag_in_layout" in d.columns else d
     for c in ("cam_x", "cam_y", "cam_z", "cam_yaw_deg", "reproj_px", "t"):
         d[c] = pd.to_numeric(d[c], errors="coerce")
+    has_joint = all(c in d.columns for c in ("joint_n_tags", "joint_x", "joint_y", "joint_z", "joint_yaw_deg"))
+    if has_joint:
+        for c in ("joint_n_tags", "joint_x", "joint_y", "joint_z", "joint_yaw_deg", "joint_reproj_px"):
+            d[c] = pd.to_numeric(d[c], errors="coerce")
     d = d.dropna(subset=["cam_x", "cam_y", "cam_z", "t"])
     rows = []
     for frame, g in d.groupby("frame", sort=True):
         P = g[["cam_x", "cam_y", "cam_z"]].to_numpy()
         mean = P.mean(axis=0)
-        spread = 0.0
-        if len(P) > 1:
-            spread = float(np.max(np.linalg.norm(P - mean, axis=1)) * 2.0)
-        rows.append({
-            "frame": int(frame), "t": float(g["t"].iloc[0]), "n_tags": int(len(g)),
-            "x": mean[0], "y": mean[1], "z": mean[2],
-            "yaw_deg": geometry.circular_mean_deg(g["cam_yaw_deg"].to_numpy()),
-            "spread_m": spread,
-            "reproj_px": float(g["reproj_px"].mean()) if "reproj_px" in g else np.nan,
-            "tags": " ".join(str(int(i)) for i in g["tag_id"].tolist()),
-        })
+        spread = float(np.max(np.linalg.norm(P - mean, axis=1)) * 2.0) if len(P) > 1 else 0.0
+        row = {"frame": int(frame), "t": float(g["t"].iloc[0]), "n_tags": int(len(g)), "spread_m": spread,
+               "tags": " ".join(str(int(i)) for i in g["tag_id"].tolist())}
+        j = g.iloc[0]
+        if has_joint and len(g) >= 2 and not np.isnan(j["joint_x"]):
+            row.update({"x": j["joint_x"], "y": j["joint_y"], "z": j["joint_z"], "yaw_deg": j["joint_yaw_deg"],
+                        "reproj_px": float(j["joint_reproj_px"]), "pose_src": "joint"})
+        else:
+            row.update({"x": mean[0], "y": mean[1], "z": mean[2],
+                        "yaw_deg": geometry.circular_mean_deg(g["cam_yaw_deg"].to_numpy()),
+                        "reproj_px": float(g["reproj_px"].mean()) if "reproj_px" in g else np.nan, "pose_src": "single"})
+        rows.append(row)
     return pd.DataFrame(rows)
 
 

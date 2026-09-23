@@ -32,7 +32,12 @@ from marker_drift.markers import Layout
 DET_FIELDS = ["frame", "t", "tag_id", "hamming", "decision_margin",
               "c0x", "c0y", "c1x", "c1y", "c2x", "c2y", "c3x", "c3y",
               "reproj_px", "tag_dist_m", "cam_x", "cam_y", "cam_z",
-              "cam_yaw_deg", "cam_pitch_deg", "cam_roll_deg", "tag_in_layout"]
+              "cam_yaw_deg", "cam_pitch_deg", "cam_roll_deg", "tag_in_layout",
+              # 프레임 안의 배치 태그 전부를 한 몸으로 푼 포즈(태그 2개 이상일 때). 프레임의 모든 행에 같은 값.
+              "joint_n_tags", "joint_reproj_px", "joint_x", "joint_y", "joint_z",
+              "joint_yaw_deg", "joint_pitch_deg", "joint_roll_deg"]
+JOINT_KEYS = ["joint_n_tags", "joint_reproj_px", "joint_x", "joint_y", "joint_z",
+              "joint_yaw_deg", "joint_pitch_deg", "joint_roll_deg"]
 
 
 def make_detector(family="tag36h11", quad_decimate=1.0, nthreads=2):
@@ -76,6 +81,24 @@ def pose_rows_for_frame(detections, frame_idx, t, intr, layout, min_margin=20.0,
                                         "cam_yaw_deg", "cam_pitch_deg", "cam_roll_deg")})
             row["tag_in_layout"] = 0
         rows.append(row)
+
+    # 배치 태그가 2개 이상이면 한 몸으로 PnP (yaw 모호성 제거)
+    joint = {k: "" for k in JOINT_KEYS}
+    in_layout = [(r, np.array([[r["c{}x".format(i)], r["c{}y".format(i)]] for i in range(4)]))
+                 for r in rows if r["tag_in_layout"] == 1]
+    joint["joint_n_tags"] = len(in_layout)
+    if len(in_layout) >= 2:
+        try:
+            R_M_C, p_M_C, err = geometry.solve_multi_tag_camera_pose(
+                [c for _, c in in_layout], [layout.pose(r["tag_id"]) for r, _ in in_layout],
+                [layout.size(r["tag_id"]) for r, _ in in_layout], intr.K, intr.dist, intr.fisheye)
+            pitch, roll = geometry.camera_pitch_roll_in_M(R_M_C)
+            joint.update({"joint_reproj_px": err, "joint_x": p_M_C[0], "joint_y": p_M_C[1], "joint_z": p_M_C[2],
+                          "joint_yaw_deg": geometry.camera_yaw_in_M(R_M_C), "joint_pitch_deg": pitch, "joint_roll_deg": roll})
+        except ValueError:
+            pass
+    for r in rows:
+        r.update(joint)
     return rows
 
 

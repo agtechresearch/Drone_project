@@ -34,8 +34,12 @@ python -m marker_drift coverage --standoff 0.5 --altitude 0.6 --tag-size 0.10 # 
 python -m marker_drift coverage --intrinsics hires.yaml --layout my.yaml --standoff 0.5 --altitude 2.0 -v
 ```
 
-기본 배치(15 cm, 1 m 간격, 이격 50 cm, 120° 화각) 결과: 경로 100 %에서 태그 1개 이상, 63 %에서 2개 이상,
-가장 작게 보일 때 한 변 111 px. 화각이 94°로 줄면 마커 사이 중간에 빈 구간이 생긴다.
+기본 배치(7 cm, 1 m 간격, 이격 50 cm, 120° 화각, 1280×800) 결과: 경로 100 %에서 태그 1개 이상, 71 %에서 2개 이상,
+한 변 52 px(벽이 화상면과 평행해 위치와 무관). 화각이 94°로 줄면 마커 사이 중간에 빈 구간이 생긴다.
+
+**태그 2개 이상이 보이는 프레임은 한 몸 PnP**(`geometry.solve_multi_tag_camera_pose`, `joint_*` 컬럼)로 푼다.
+7 cm 태그 하나짜리 PnP 는 정면 근처에서 yaw 가 최대 1.8° 튀지만(평면 포즈 모호성), 두 태그를 묶으면 0.3° 이내다.
+`per_frame_pose` 는 joint 가 있으면 그것을 쓰고(`pose_src="joint"`), 태그별 위치 불일치 `spread_m` 은 진단용으로 남긴다.
 
 ### ② 캘리브레이션
 

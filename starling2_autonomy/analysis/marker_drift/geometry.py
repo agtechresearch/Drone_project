@@ -158,6 +158,48 @@ def solve_tag_pose(corners_px, size_m, K, dist=None, fisheye=False):
     return R, t, err
 
 
+def solve_multi_tag_camera_pose(corners_list, tag_poses_M, sizes_m, K, dist=None, fisheye=False):
+    """같은 프레임의 태그 여러 개를 한 몸으로 보고 PnP -> (R_M_C, p_M_C, 재투영 RMS px).
+
+    corners_list : [(4,2) 픽셀 코너, ...]  (AprilTag 순서)
+    tag_poses_M  : [(R_M_T, p_M_T), ...]   배치 파일의 M 포즈
+    sizes_m      : [태그 크기, ...]
+
+    태그 하나짜리 PnP 는 정면에서 볼 때 평면 포즈 모호성(두 해가 비슷한 재투영 오차) 때문에 yaw 가 튀거나
+    부호가 뒤집힐 수 있다. 태그 2개 이상이면 기준선(1 m)이 생겨 yaw 가 안정된다. 작은 태그(6~7 cm)에서 특히 중요.
+    """
+    if cv2 is None:
+        raise RuntimeError("cv2 가 필요합니다")
+    obj = []
+    img = []
+    for corners, (R_M_T, p_M_T), s in zip(corners_list, tag_poses_M, sizes_m):
+        P_T = tag_object_points(s)
+        obj.append((np.asarray(R_M_T) @ P_T.T).T + np.asarray(p_M_T))
+        img.append(np.asarray(corners, float).reshape(4, 2))
+    obj = np.vstack(obj)
+    img = np.vstack(img)
+    K = np.asarray(K, float)
+    d = None if dist is None else np.asarray(dist, float)
+    if fisheye:
+        und = cv2.fisheye.undistortPoints(img.reshape(-1, 1, 2), K, d.reshape(-1, 1) if d is not None else np.zeros((4, 1)))
+        img_pnp, K_pnp, d_pnp = und.reshape(-1, 2), np.eye(3), None
+    else:
+        img_pnp, K_pnp, d_pnp = img, K, d
+    flags = cv2.SOLVEPNP_SQPNP if len(obj) >= 8 else cv2.SOLVEPNP_ITERATIVE
+    ok, rvec, tvec = cv2.solvePnP(obj, img_pnp, K_pnp, d_pnp, flags=flags)
+    if not ok:
+        raise ValueError("multi-tag solvePnP 실패")
+    rvec, tvec = cv2.solvePnPRefineLM(obj, img_pnp, K_pnp, d_pnp, rvec, tvec)
+    R_C_M, _ = cv2.Rodrigues(rvec)
+    p_C_M = tvec.reshape(3)
+    reproj, _ = cv2.projectPoints(obj, rvec, tvec, K_pnp, d_pnp if d_pnp is not None else np.zeros(5))
+    err = float(np.sqrt(((reproj.reshape(-1, 2) - img_pnp) ** 2).sum(axis=1).mean()))
+    if fisheye:
+        err *= float((K[0, 0] + K[1, 1]) / 2.0)
+    R_M_C, p_M_C = invert(R_C_M, p_C_M)
+    return R_M_C, p_M_C, err
+
+
 def camera_pose_from_tag(R_C_T, t_C_T, R_M_T, p_M_T):
     """태그의 카메라 프레임 포즈 + 태그의 M 포즈 -> 카메라의 M 포즈 (R_M_C, p_M_C)."""
     R_T_C, p_T_C = invert(np.asarray(R_C_T, float), np.asarray(t_C_T, float))
