@@ -15,6 +15,19 @@ python -m venv .venv
 
 명령은 `analysis/` 폴더에서 `python -m marker_drift <command>` 로 실행한다.
 
+## 검증 방식 (합성 데이터)
+
+테스트는 정답(카메라 위치·방향)을 정해 놓고 그 자리에서 보일 마커를 원근법으로 그린 가짜 사진을 만든 뒤,
+실제 검출기(pupil_apriltags)와 PnP 로 정답을 되찾는지 확인한다. 실제 비행 영상이 없어도 좌표계·부호·회전 규약을 검증할 수 있다.
+
+![합성 마커 장면](../../docs/img/09_synthetic_marker_scene.png)
+
+위: 정답 x=0.5 m, 벽에서 0.5 m, 높이 0.6 m, 오른쪽 3° 에서 그린 장면(7 cm 태그, 0.5 m 간격, hires 120° 가정).
+초록 테두리 = 검출, 파란 글씨 = 정답 대 복원값. 아래는 합성 비행(호버 10 s → 5.5 m 이동 → 호버 5 s, 드리프트 주입)을
+`analyze` 로 처리한 결과 그림이다.
+
+![합성 비행 분석 예](../../docs/img/09_analysis_demo_synthetic.png)
+
 ## 흐름
 
 ```
