@@ -11,6 +11,7 @@ YAML 형식:
 좌표는 M 프레임(geometry.py). 설치 후 실측값으로 x, z 를 갱신해 쓴다.
 """
 
+import math
 import os
 
 import yaml
@@ -22,17 +23,17 @@ LAYOUT_DIR = os.path.join(os.path.dirname(__file__), "layouts")
 
 def default_lab_layout(spacing_m=1.0, length_m=5.5, low_z=0.60, high_z=2.00, size_m=0.07):
     """docs/09 §4.1 기본 배치: 하단열 ID 0~6 (60 cm), 상단열 ID 10~16 (200 cm), 1 m 간격 + 마지막 0.5 m."""
-    xs = []
-    x = 0.0
-    while x < length_m - 1e-9:
-        xs.append(round(x, 3))
-        x += spacing_m
-    xs.append(round(length_m, 3))
+    n = int(math.floor(length_m / spacing_m + 1e-9))
+    xs = [round(i * spacing_m, 3) for i in range(n + 1)]
+    if xs[-1] < round(length_m, 3) - 1e-9:
+        xs.append(round(length_m, 3))   # 마지막 0.5 m 구간처럼 간격으로 나눠지지 않는 끝점
+    # 상단열 ID 는 하단열 개수를 10 단위로 올린 값부터 (7개/열 -> 10~16, 12개/열 -> 20~31)
+    high_offset = 10 * int(math.ceil(len(xs) / 10.0))
     markers = []
     for i, x in enumerate(xs):
         markers.append({"id": i, "x": x, "y": 0.0, "z": low_z})
     for i, x in enumerate(xs):
-        markers.append({"id": 10 + i, "x": x, "y": 0.0, "z": high_z})
+        markers.append({"id": high_offset + i, "x": x, "y": 0.0, "z": high_z})
     return {
         "name": "lab_default",
         "tag_family": "tag36h11",
