@@ -4,6 +4,7 @@
   cd starling2_autonomy
   .venv/Scripts/python analysis/test_marker_drift.py      (Windows)
   .venv/bin/python     analysis/test_marker_drift.py      (Linux/mac)
+  ... --save-dir analysis/samples/synthetic              합성 장면·검출 결과 PNG 를 저장 (기본은 저장 안 함)
 
 합성 데이터로 검증한다:
   - 좌표계 규약(T -> M, 카메라 yaw 부호)
@@ -30,6 +31,28 @@ from marker_drift.intrinsics import Intrinsics  # noqa: E402
 from marker_drift.markers import Layout, default_lab_layout  # noqa: E402
 
 RESULTS = []
+SAVE_DIR = None   # --save-dir 로 지정하면 합성 장면을 PNG 로 남긴다
+
+
+def save_scene(name, img, rows, truth_pose=None, truth_yaw=None, solved=None):
+    """검출 상자·정답·복원값을 그려 SAVE_DIR/name.png 로 저장."""
+    if SAVE_DIR is None:
+        return
+    import cv2
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    vis = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    for r in rows:
+        c = np.array([[r["c%dx" % i], r["c%dy" % i]] for i in range(4)]).astype(int)
+        cv2.polylines(vis, [c], True, (0, 200, 0), 2)
+        cv2.putText(vis, "id %d" % r["tag_id"], (int(c[3][0]), int(c[3][1]) - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+    y = 32
+    if truth_pose is not None:
+        cv2.putText(vis, "truth : x=%.3f y=%.3f z=%.3f yaw=%.2f deg" % (truth_pose[0], truth_pose[1], truth_pose[2], truth_yaw),
+                    (16, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 120, 0), 2)
+        y += 28
+    if solved is not None:
+        cv2.putText(vis, solved, (16, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 120, 0), 2)
+    cv2.imwrite(os.path.join(SAVE_DIR, name + ".png"), vis)
 
 
 def check(name, cond, detail=""):
@@ -150,6 +173,10 @@ def test_rendered_detection():
     tex, tc = canonical_tag_texture(0)
     det = make_detector()
     r = det.detect(tex)
+    if SAVE_DIR is not None:
+        import cv2
+        os.makedirs(SAVE_DIR, exist_ok=True)
+        cv2.imwrite(os.path.join(SAVE_DIR, "tag36h11_id0_texture.png"), tex)
     ok = len(r) == 1 and r[0].tag_id == 0
     c = r[0].corners if ok else None
     order_ok = ok and np.allclose(c, tc, atol=1.5)
@@ -173,6 +200,10 @@ def test_rendered_detection():
             continue
         P = np.array([[r["cam_x"], r["cam_y"], r["cam_z"]] for r in rows])
         yaws = np.array([r["cam_yaw_deg"] for r in rows])
+        j0 = rows[0]
+        solved_txt = ("solved: x=%.3f y=%.3f z=%.3f yaw=%.2f deg (%d tags, joint PnP)" %
+                      (j0["joint_x"], j0["joint_y"], j0["joint_z"], j0["joint_yaw_deg"], j0["joint_n_tags"])) if len(rows) >= 2 else                      ("solved: x=%.3f y=%.3f z=%.3f yaw=%.2f deg (1 tag)" % (P[0][0], P[0][1], P[0][2], yaws[0]))
+        save_scene("scene_x%.2f_z%.2f_yaw%+.1f" % (pos[0], pos[2], att[0]), img, rows, p_true, geometry.camera_yaw_in_M(R_true), solved_txt)
         pos_err = np.linalg.norm(P.mean(axis=0) - p_true)
         yaw_err = abs(geometry.wrap_deg(geometry.circular_mean_deg(yaws) - geometry.camera_yaw_in_M(R_true)))
         spread = float(np.max(np.linalg.norm(P - P.mean(axis=0), axis=1))) if len(P) > 1 else 0.0
@@ -205,6 +236,8 @@ def test_joint_vs_single_small_tags():
         for r in rows:
             single_errs.append(abs(geometry.wrap_deg(r["cam_yaw_deg"] - yaw)))
         joint_errs.append(abs(geometry.wrap_deg(rows[0]["joint_yaw_deg"] - yaw)))
+        save_scene("joint_vs_single_yaw%+.1f" % yaw, img, rows, p_true, yaw,
+                   "single yaw: %s | joint yaw: %.2f" % (", ".join("%.2f" % r["cam_yaw_deg"] for r in rows), rows[0]["joint_yaw_deg"]))
     check("한 몸 PnP yaw 오차 최대 < 0.5 deg", joint_errs and max(joint_errs) < 0.5,
           "joint max={:.2f} mean={:.2f} | single max={:.2f} mean={:.2f} (deg)".format(
               max(joint_errs) if joint_errs else float("nan"), np.mean(joint_errs) if joint_errs else float("nan"),
@@ -436,6 +469,10 @@ def test_cli_analyze_end_to_end():
 
 
 def main():
+    global SAVE_DIR
+    if "--save-dir" in sys.argv:
+        SAVE_DIR = sys.argv[sys.argv.index("--save-dir") + 1]
+        print("saving synthetic scenes to {}".format(SAVE_DIR))
     tests = [test_conventions, test_pnp_roundtrip, test_rendered_detection, test_joint_vs_single_small_tags, test_alignment_and_metrics,
              test_per_frame_pose, test_v14_loader, test_voxl_logger_loaders, test_layout_and_stats, test_cli_analyze_end_to_end]
     for t in tests:
