@@ -75,6 +75,10 @@ $EDITOR .env.local          # DRONE_HOST 를 ~/.ssh/config alias 로 지정
 # 단위테스트 — 둘 다 기체 없이 실행 가능
 python analysis/test_geofence_v14.py       # 지오펜스 25항목
 python analysis/test_mpa_point_cloud.py    # voa_pc_out 파서 60항목
+
+# 마커 드리프트 후처리(docs/09)는 numpy·opencv·pupil-apriltags 등이 필요하므로 venv 에서 돈다
+python -m venv .venv && .venv/Scripts/python -m pip install numpy opencv-python pupil-apriltags pandas matplotlib scipy pyyaml
+.venv/Scripts/python analysis/test_marker_drift.py   # 59항목 (합성 렌더링으로 검출기 경로까지 검증)
 ```
 
 기체에 연결돼 있다면 포인트클라우드를 직접 볼 수 있다.

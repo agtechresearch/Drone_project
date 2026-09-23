@@ -172,7 +172,11 @@ Drone_project/starling2_autonomy/
 │   └── pull.sh                        기체 ↔ 저장소 대조 (drift 감지)
 └── analysis/              ← 단위테스트·분석 산출물
     ├── test_geofence_v14.py           v14 지오펜스 25항목 검증
-    └── test_mpa_point_cloud.py        포인트클라우드 파서 60항목 검증
+    ├── test_mpa_point_cloud.py        포인트클라우드 파서 60항목 검증
+    ├── test_marker_drift.py           마커 드리프트 파이프라인 59항목 검증 (venv 필요)
+    └── marker_drift/                  docs/09 후처리 패키지: coverage·calibrate·detect·noise·analyze·compare
+        ├── README.md                  사용법·좌표계·손 촬영 검증 절차
+        └── layouts/lab_default.yaml   기본 마커 배치 (설치 후 실측값으로 갱신)
 ```
 
 > **비행 코드의 원본은 이 저장소다.** 기체는 실행 사본이므로 기체에서 직접 편집하지 않는다.
