@@ -404,8 +404,16 @@ class MpaPointCloudClient(object):
         # O_NONBLOCK으로 열면 쓰는 쪽이 아직 없어도 즉시 성공한다.
         # 실제 대기는 select로 한다.
         self._fd = os.open(self.fifo_path, os.O_RDONLY | os.O_NONBLOCK)
-        self._stream = PointCloudStream(self._read)
+        self._stream = self._make_stream()
         return self
+
+    def _make_stream(self):
+        """구독한 바이트 스트림에 붙일 파서를 만든다.
+
+        접속·대기·정리 절차는 MPA 파이프 공통이고 자료형만 다르다. 다른 자료형
+        (예: tag_detections)은 이 클래스를 상속해 이 메서드만 바꾸면 된다.
+        """
+        return PointCloudStream(self._read)
 
     # -- 읽기 --------------------------------------------------------------
 

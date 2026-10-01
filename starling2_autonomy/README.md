@@ -76,6 +76,8 @@ $EDITOR .env.local          # DRONE_HOST 를 ~/.ssh/config alias 로 지정
 # 단위테스트 — 둘 다 기체 없이 실행 가능
 python analysis/test_geofence_v14.py       # 지오펜스 25항목
 python analysis/test_mpa_point_cloud.py    # voa_pc_out 파서 60항목
+python analysis/test_mpa_tag_detections.py # tag_detections 파서 49항목
+python analysis/test_tag_align.py          # 태그 정렬(yaw 폐루프) 74항목
 
 # 마커 드리프트 후처리(docs/09)는 numpy·opencv·pupil-apriltags 등이 필요하므로 venv 에서 돈다
 python -m venv .venv && .venv/Scripts/python -m pip install numpy opencv-python pupil-apriltags pandas matplotlib scipy pyyaml
@@ -87,6 +89,13 @@ python -m venv .venv && .venv/Scripts/python -m pip install numpy opencv-python 
 ```bash
 ./tools/deploy.sh flight/mpa_point_cloud.py
 ssh $DRONE_HOST "python3 /home/root/mpa_point_cloud.py voa_pc_out --seconds 5"
+```
+
+태그 검출(`voxl-tag-detector` 가 떠 있을 때)도 같은 식이다. 세 파일을 같은 폴더에 둬야 한다.
+
+```bash
+for f in mpa_point_cloud mpa_tag_detections tag_align; do ./tools/deploy.sh -y flight/$f.py; done
+ssh $DRONE_HOST "python3 /home/root/mpa_tag_detections.py --seconds 10 --align"
 ```
 
 아래 명령은 모두 `starling2_autonomy/` 안에서 실행한다.

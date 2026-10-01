@@ -112,6 +112,7 @@ OpenCV FileStorage 형식 → `marker_drift.intrinsics.Intrinsics.load()` 가 �
 2. **hires 캘리브레이션** — 체커보드를 `voxl-logger -c hires_large_color -t 20` 으로 찍어 `marker_drift calibrate`.
    small 과 large 는 같은 센서의 다른 크롭/스케일이므로 large 로 캘리브레이션하고 small 은 스케일링 검증.
 3. **hires_large_color 기록 부하 시험** — `-t 10` 기록 중 `voxl-inspect-cpu`, 드롭 여부(`info.json dropped_data`).
-4. **tag_detections 파이썬 구독기** — `tag_detection_t` 252 B 언팩, `mpa_point_cloud.py` 패턴. 정렬 모듈의 입력.
+4. ~~**tag_detections 파이썬 구독기**~~ — 작성 완료 (2026-10-01, `flight/mpa_tag_detections.py`, 252 B 확인). 기체에서는
+   `python3 mpa_tag_detections.py --seconds 10 --align` 으로 실제 레코드 파싱·yaw 오차 출력을 확인할 것(법선 부호 관례, cam 이름, Hz).
 5. 정지 30 s 기록 → `marker_drift noise` 로 허용오차 첫 값.
 6. (7월 미결) `voa_pc_out` 좌표 부호 실측.

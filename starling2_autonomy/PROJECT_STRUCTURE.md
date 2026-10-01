@@ -168,6 +168,8 @@ Drone_project/starling2_autonomy/
 ├── flight/                ← 비행 코드 원본 (기체에 배포되는 실체)
 │   ├── path_flight_phase1_v14.py      현행 메인 코드
 │   ├── mpa_point_cloud.py             voa_pc_out 구독기 (라이브러리 겸 진단 CLI)
+│   ├── mpa_tag_detections.py          tag_detections 구독기 (voxl-tag-detector 출력, 위 클라이언트 상속)
+│   ├── tag_align.py                   태그 정렬: 두 태그 연결선 → yaw 오차, 폐루프 상태기계 (v15 입력)
 │   ├── legacy/                        v13·CR·초기판 (참조용, 배포 안 함)
 │   └── tools_onboard/                 기체에서 돌리는 보조 스크립트
 ├── tools/                 ← 기체 동기화
@@ -176,6 +178,8 @@ Drone_project/starling2_autonomy/
 └── analysis/              ← 단위테스트·분석 산출물
     ├── test_geofence_v14.py           v14 지오펜스 25항목 검증
     ├── test_mpa_point_cloud.py        포인트클라우드 파서 60항목 검증
+    ├── test_mpa_tag_detections.py     태그 검출 파서 49항목 검증
+    ├── test_tag_align.py              태그 정렬 측정·컨트롤러 74항목 검증 (가짜 카메라·가짜 기체)
     ├── test_marker_drift.py           마커 드리프트 파이프라인 70항목 검증 (venv 필요)
     └── marker_drift/                  docs/09 후처리 패키지: coverage·calibrate·detect·noise·analyze·compare
         ├── README.md                  사용법·좌표계·손 촬영 검증 절차
