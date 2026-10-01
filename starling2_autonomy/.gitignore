@@ -24,3 +24,6 @@ logs/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 현수막 무늬 생성 산출물 (analysis/banner_pattern.py 로 재생성 가능, PDF/PNG 수 MB)
+analysis/banner_out/
