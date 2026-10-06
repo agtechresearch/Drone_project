@@ -5,7 +5,7 @@ VIO 용 현수막 무늬 생성기 (docs/09 전방 현수막)
 세 가지 무늬를 같은 크기·같은 파일 형식으로 뽑는다. `--style` 로 고른다.
   blobs  불규칙 얼룩 (기본). 크기·간격·모양이 제각각이라 어느 자리인지 구분된다. 드론 연구실의 "VIO 벽지".
   grid   불규칙 간격 격자. 선 간격·굵기·톤이 제각각이라 "어느 칸인지" 구분된다. `--regular` 를 주면
-         흔히 생각하는 균일 30 cm 격자(반복 질감의 약점을 보려는 대조용).
+         균일 격자(`--grid-spacing`, `--grid-width`). 2026-10-06 결정: 50 cm × 5 m 균일 격자.
   bed    재배단 그림. 3단 선반 + 상추 포기 + 선반 기둥 + LED 바 + 점적 호스. 현장(실내 재배실) 과 비슷하게.
 
 왜 단색은 안 되는가: 카메라가 기억할 특징점이 없어 VIO 가 무너진다. 왜 균일 격자는 애매한가: 점은
@@ -158,8 +158,10 @@ def rect(x0, y0, x1, y1):
     return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
 
 
-def tag_tick_positions(width_m, n_tags=12, spacing=0.5):
-    """태그 0~11 중심 x (m). 전체 폭 가운데 정렬."""
+def tag_tick_positions(width_m, n_tags=12, spacing=0.5, margin=0.25):
+    """태그 0~11 중심 x (m). 전체 폭 가운데 정렬. 폭이 모자라면 들어가는 개수만."""
+    n_fit = int((width_m - 2 * margin) / spacing) + 1
+    n_tags = max(0, min(n_tags, n_fit))
     span = (n_tags - 1) * spacing
     x0 = (width_m - span) / 2.0
     return [(i, x0 + i * spacing) for i in range(n_tags)]
@@ -265,17 +267,17 @@ def _positions(length, lo, hi, rng, regular=None):
 
 
 def style_grid(cv, args, rng, out_dir):
-    reg = 0.30 if args.regular else None
+    reg = args.grid_spacing if args.regular else None
     xs = _positions(args.width, 0.18, 0.55, rng, reg)
     ys = _positions(args.height, 0.15, 0.45, rng, reg)
     n_lines = 0
     for x in xs:
-        w = 0.012 if reg else rng.uniform(0.006, 0.028)
+        w = args.grid_width if reg else rng.uniform(0.006, 0.028)
         tone = 0.0 if (reg or rng.uniform() < 0.7) else 0.4
         cv.polygon(rect(x - w / 2, 0.0, x + w / 2, args.height), (tone, tone, tone))
         n_lines += 1
     for y in ys:
-        w = 0.012 if reg else rng.uniform(0.006, 0.028)
+        w = args.grid_width if reg else rng.uniform(0.006, 0.028)
         tone = 0.0 if (reg or rng.uniform() < 0.7) else 0.4
         cv.polygon(rect(0.0, y - w / 2, args.width, y + w / 2), (tone, tone, tone))
         n_lines += 1
@@ -288,7 +290,8 @@ def style_grid(cv, args, rng, out_dir):
                     r = rng.uniform(0.015, 0.035)
                     cv.polygon(rect(x - r, y - r, x + r, y + r), (0.0, 0.0, 0.0))
                     n_dots += 1
-    kind = "균일 30 cm" if reg else "불규칙 (세로선 간격 18~55 cm, 가로선 15~45 cm, 굵기 0.6~2.8 cm)"
+    kind = ("균일 {:.0f} cm 간격, 굵기 {:.1f} cm".format(reg * 100, args.grid_width * 100) if reg
+            else "불규칙 (세로선 간격 18~55 cm, 가로선 15~45 cm, 굵기 0.6~2.8 cm)")
     return ["격자        : {}".format(kind),
             "선 수       : 세로 {} + 가로 {} = {}, 교차점 점 {}".format(len(xs), len(ys), n_lines, n_dots)]
 
@@ -410,7 +413,9 @@ def main(argv=None):
     ap.add_argument("--r-min", type=float, default=0.005, help="[blobs] 최소 반지름 (m)")
     ap.add_argument("--r-max", type=float, default=0.06, help="[blobs] 최대 반지름 (m)")
     ap.add_argument("--gray-frac", type=float, default=0.25, help="[blobs] 진회색 얼룩 비율")
-    ap.add_argument("--regular", action="store_true", help="[grid] 균일 30 cm 격자 (대조용)")
+    ap.add_argument("--regular", action="store_true", help="[grid] 균일 격자")
+    ap.add_argument("--grid-spacing", type=float, default=0.10, help="[grid --regular] 격자 간격 (m)")
+    ap.add_argument("--grid-width", type=float, default=0.012, help="[grid --regular] 선 굵기 (m)")
     ap.add_argument("--no-ticks", action="store_true", help="하단 태그 위치 눈금 생략")
     ap.add_argument("--px-per-mm", type=float, default=2.0)
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "banner_out"))
@@ -430,8 +435,11 @@ def main(argv=None):
     cv = MultiCanvas([raster, vector])
 
     lines = STYLES[args.style](cv, args, rng, args.out)
-    if not args.no_ticks:
+    ticks = [] if args.no_ticks else tag_tick_positions(args.width)
+    if ticks:
         draw_ticks(cv, args.width)
+        lines.append("태그 눈금   : {}개 (ID 0~{}), x = {:.2f} m 부터 0.5 m 간격".format(
+            len(ticks), ticks[-1][0], ticks[0][1]))
 
     vector.save(pdf)
     raster.save(png)
