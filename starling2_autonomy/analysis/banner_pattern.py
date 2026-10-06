@@ -418,6 +418,8 @@ def main(argv=None):
     ap.add_argument("--grid-width", type=float, default=0.012, help="[grid --regular] 선 굵기 (m)")
     ap.add_argument("--no-ticks", action="store_true", help="하단 태그 위치 눈금 생략")
     ap.add_argument("--px-per-mm", type=float, default=2.0)
+    ap.add_argument("--pdf-scale", type=float, default=10.0,
+                    help="PDF 축소 배율 (10 = 1/10 축소, 1 = 실제 크기; PDF 한 변 최대 약 508 cm)")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "banner_out"))
     args = ap.parse_args(argv)
 
@@ -426,12 +428,14 @@ def main(argv=None):
     bg = (0.92, 0.92, 0.91) if args.style == "bed" else (1.0, 1.0, 1.0)
     name = args.style + ("_regular" if (args.style == "grid" and args.regular) else "")
     stem = "banner_{}_{:.0f}x{:.0f}mm".format(name, args.width * 1000, args.height * 1000)
-    pdf = os.path.join(args.out, stem + "_scale10.pdf")
+    pdf = os.path.join(args.out, stem + ("_scale{:g}.pdf".format(args.pdf_scale) if args.pdf_scale != 1 else "_actual_size.pdf"))
     png = os.path.join(args.out, stem + "_{:g}pxmm.png".format(args.px_per_mm))
     prev = os.path.join(args.out, "banner_{}_preview.jpg".format(name))
 
     raster = CvCanvas(args.width, args.height, args.px_per_mm, bg)
-    vector = MplCanvas(args.width, args.height, 10.0, bg)
+    if max(args.width, args.height) * 1000.0 / args.pdf_scale > 5080.0:
+        ap.error("PDF 한 변이 508 cm 를 넘는다. --pdf-scale 을 키울 것")
+    vector = MplCanvas(args.width, args.height, args.pdf_scale, bg)
     cv = MultiCanvas([raster, vector])
 
     lines = STYLES[args.style](cv, args, rng, args.out)
