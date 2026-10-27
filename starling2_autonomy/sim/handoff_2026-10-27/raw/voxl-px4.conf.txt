@@ -1,0 +1,12 @@
+## voxl-px4.conf
+#!/bin/bash
+#
+# voxl-px4 Configuration File    
+#    
+# AIRFRAME:    
+#     Tell PX4 which AIRFRAME to use.    
+#     Options include: [MULTICOPTER, FIXED_WING]    
+#    
+# GPS:    
+#     Tell PX4 which GPS to use. If there is no GPS unit use NONE. Otherwise    
+#     choose AUTODETECT and the startup script will attempt to automatically    

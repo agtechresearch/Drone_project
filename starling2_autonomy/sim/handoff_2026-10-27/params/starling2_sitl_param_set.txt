@@ -1,0 +1,190 @@
+# PX4 shell(pxh>) 또는 SITL 커스텀 에어프레임(init.d-posix)용 'param set' 목록
+# 출처: Starling 2 실기체 px4-param show, 2026-10-27
+
+# ---- 기체/믹서 (SYS_AUTOSTART 4001 = Generic Quad X, 로터 위치는 Starling 2 실측)
+param set SYS_AUTOSTART 4001
+param set MAV_TYPE 2
+param set CA_AIRFRAME 0
+param set CA_ROTOR_COUNT 4
+param set CA_ROTOR0_PX 0.0850
+param set CA_ROTOR0_PY 0.0625
+param set CA_ROTOR0_KM 0.0500
+param set CA_ROTOR1_PX -0.0850
+param set CA_ROTOR1_PY -0.0625
+param set CA_ROTOR1_KM 0.0500
+param set CA_ROTOR2_PX 0.0850
+param set CA_ROTOR2_PY -0.0625
+param set CA_ROTOR2_KM -0.0500
+param set CA_ROTOR3_PX -0.0850
+param set CA_ROTOR3_PY 0.0625
+param set CA_ROTOR3_KM -0.0500
+param set THR_MDL_FAC 0.9000
+
+# ---- 추정기 EKF2 (VIO 전용, GPS/MAG 없음, 고도 기준 = vision)
+param set SYS_MC_EST_GROUP 2
+param set SYS_HAS_GPS 0
+param set SYS_HAS_MAG 0
+param set SYS_HAS_BARO 1
+param set EKF2_EV_CTRL 7
+param set EKF2_HGT_REF 3
+param set EKF2_GPS_CTRL 0
+param set EKF2_MAG_TYPE 5
+param set EKF2_BARO_CTRL 1
+param set EKF2_RNG_CTRL 1
+param set EKF2_OF_CTRL 0
+param set EKF2_EV_DELAY 0.0000
+param set EKF2_EV_QMIN 1
+param set EKF2_EV_NOISE_MD 0
+param set EKF2_EVP_NOISE 0.1000
+param set EKF2_EVV_NOISE 0.1000
+param set EKF2_EVA_NOISE 0.1000
+param set EKF2_EV_POS_X 0.0000
+param set EKF2_EV_POS_Y 0.0000
+param set EKF2_EV_POS_Z 0.0000
+param set EKF2_IMU_POS_X 0.0043
+param set EKF2_IMU_POS_Y 0.0073
+param set EKF2_IMU_POS_Z -0.0160
+param set EKF2_BARO_NOISE 3.0000
+param set EKF2_RNG_DELAY 50.0000
+param set EKF2_REQ_GPS_H 5.0000
+param set EKF2_REQ_SACC 1.5000
+
+# ---- 위치/속도 제어 MPC (오프보드 미션 속도·가속 한계에 직접 영향)
+param set MPC_POS_MODE 4
+param set MPC_XY_P 3.5000
+param set MPC_Z_P 5.0000
+param set MPC_XY_VEL_P_ACC 3.0000
+param set MPC_XY_VEL_I_ACC 0.1000
+param set MPC_XY_VEL_D_ACC 0.0000
+param set MPC_Z_VEL_P_ACC 8.0000
+param set MPC_XY_VEL_MAX 5.0000
+param set MPC_XY_CRUISE 5.0000
+param set MPC_XY_VEL_ALL -10.0000
+param set MPC_VEL_MANUAL 3.0000
+param set MPC_Z_VEL_MAX_UP 3.0000
+param set MPC_Z_VEL_MAX_DN 1.5000
+param set MPC_Z_VEL_ALL -3.0000
+param set MPC_Z_V_AUTO_UP 0.5000
+param set MPC_Z_V_AUTO_DN 0.5000
+param set MPC_ACC_HOR 3.0000
+param set MPC_ACC_HOR_MAX 1000.0000
+param set MPC_ACC_UP_MAX 3.0000
+param set MPC_ACC_DOWN_MAX 3.0000
+param set MPC_JERK_MAX 40.0000
+param set MPC_TILTMAX_AIR 30.0000
+param set MPC_TILTMAX_LND 12.0000
+param set MPC_YAWRAUTO_MAX 45.0000
+param set MPC_THR_HOVER 0.3400
+param set MPC_THR_MIN 0.0700
+param set MPC_THR_MAX 0.6000
+param set MPC_MANTHR_MIN 0.0700
+param set MPC_TKO_SPEED 0.5000
+param set MPC_TKO_RAMP_T 1.0000
+param set MPC_LAND_SPEED 0.6000
+param set MPC_LAND_ALT1 10.0000
+param set MPC_LAND_ALT2 5.0000
+param set MPC_LAND_ALT3 1.0000
+param set MPC_HOLD_MAX_XY 0.0000
+param set MPC_HOLD_MAX_Z 0.0000
+param set MPC_XY_MAN_EXPO 0.4500
+param set MPC_Z_MAN_EXPO 0.1000
+param set MPC_YAW_EXPO 0.3000
+param set MIS_TAKEOFF_ALT 0.5000
+
+# ---- 자세/각속도 제어 MC (실기체 튜닝값 — SITL 모델 동역학이 다르면 불안정할 수 있음, 선택 적용)
+param set MC_ROLL_P 16.0000
+param set MC_PITCH_P 16.0000
+param set MC_YAW_P 2.8000
+param set MC_ROLLRATE_P 0.0720
+param set MC_ROLLRATE_I 0.1710
+param set MC_ROLLRATE_D 0.0009
+param set MC_ROLLRATE_MAX 130.0000
+param set MC_ROLL_CUTOFF 30.0000
+param set MC_PITCHRATE_P 0.0970
+param set MC_PITCHRATE_I 0.2280
+param set MC_PITCHRATE_D 0.0011
+param set MC_PITCHRATE_MAX 130.0000
+param set MC_PITCH_CUTOFF 30.0000
+param set MC_YAWRATE_P 0.1500
+param set MC_YAWRATE_I 0.5000
+param set MC_YAWRATE_D 0.0000
+param set MC_YAWRATE_K 1.0000
+param set MC_YAWRATE_MAX 150.0000
+param set MC_YAW_CUTOFF 10.0000
+
+# ---- Commander / 실패안전 / 오프보드
+param set COM_RC_IN_MODE 3
+param set COM_OBL_RC_ACT 0
+param set COM_OF_LOSS_T 1.0000
+param set COM_RCL_EXCEPT 0
+param set NAV_RCL_ACT 2
+param set NAV_DLL_ACT 0
+param set COM_POS_FS_DELAY 1
+param set COM_POS_FS_EPH 5.0000
+param set COM_VEL_FS_EVH 1.0000
+param set COM_LOW_BAT_ACT 0
+param set COM_OBS_AVOID 0
+param set COM_ARM_WO_GPS 1
+param set COM_ARM_EKF_POS 0.5000
+param set COM_ARM_EKF_VEL 0.5000
+param set COM_ARM_EKF_HGT 1.0000
+param set COM_ARM_EKF_YAW 0.5000
+param set COM_ARM_EKF_BIAS 3.0000
+param set COM_ARM_SDCARD 0
+param set COM_CPU_MAX -1.0000
+param set COM_PREARM_MODE 0
+param set COM_SPOOLUP_TIME 2.0000
+param set COM_DISARM_LAND 0.1000
+param set COM_DISARM_PRFLT 20.0000
+param set COM_KILL_DISARM 0.0000
+param set COM_FAIL_ACT_T 0.0000
+param set COM_TAKEOFF_ACT 0
+param set COM_FLTMODE1 0
+param set COM_FLTMODE2 0
+param set COM_FLTMODE3 2
+param set COM_FLTMODE4 2
+param set COM_FLTMODE5 7
+param set COM_FLTMODE6 7
+
+# ---- 항법 / 지오펜스 / 충돌방지 (전부 기본값 = 꺼짐, docs/04 참고)
+param set NAV_ACC_RAD 10.0000
+param set NAV_MC_ALT_RAD 0.8000
+param set MIS_DIST_1WP 900.0000
+param set MIS_YAW_ERR 12.0000
+param set MIS_YAW_TMT -1.0000
+param set GF_ACTION 2
+param set GF_SOURCE 0
+param set GF_MAX_HOR_DIST 0.0000
+param set GF_MAX_VER_DIST 0.0000
+param set GF_PREDICT 0
+param set GF_ALTMODE 0
+param set GF_COUNT -1
+param set CP_DIST -1.0000
+param set CP_DELAY 0.4000
+param set CP_GUIDE_ANG 30.0000
+param set CP_GO_NO_DATA 0
+param set RTL_TYPE 0
+param set RTL_RETURN_ALT 60.0000
+param set RTL_DESCEND_ALT 30.0000
+param set RTL_MIN_DIST 10.0000
+param set RTL_LAND_DELAY 0.0000
+
+# ---- 착륙 감지 LNDMC
+param set LNDMC_ROT_MAX 30.0000
+param set LNDMC_TRIG_TIME 0.5000
+param set LNDMC_XY_VEL_MAX 1.5000
+param set LNDMC_Z_VEL_MAX 0.2500
+param set LNDMC_ALT_GND 2.0000
+param set LNDMC_ALT_MAX -1.0000
+
+# ---- 배터리 (2S 3950 mAh)
+param set BAT1_N_CELLS 2
+param set BAT1_CAPACITY 3950.0000
+param set BAT1_V_CHARGED 4.1000
+param set BAT1_V_EMPTY 2.8000
+param set BAT1_R_INTERNAL 0.0220
+param set BAT1_SOURCE 0
+param set BAT_LOW_THR 0.1500
+param set BAT_CRIT_THR 0.1000
+param set BAT_EMERGEN_THR 0.0500
+
