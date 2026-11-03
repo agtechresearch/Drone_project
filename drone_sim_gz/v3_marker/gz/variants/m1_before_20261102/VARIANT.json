@@ -1,0 +1,1 @@
+{"variant": "m1_before_20261102", "what": "the installed starling2_tof until 2026-11-02 (links 0.293 kg, IMU at base_link origin)", "sdf_sha256": "1da10a14773d581563cfa00d98e351961c004caad19fc7d6783b46fe416c5694", "use": "WK_MODEL_DIR=/home/dronesim/starling_sim/v3_marker/gz/variants/m1_before_20261102 to fly it again"}

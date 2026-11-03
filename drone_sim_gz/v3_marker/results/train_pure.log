@@ -1,0 +1,11 @@
+steps 200000  mean episode reward nan  (80 s)
+steps 400000  mean episode reward nan  (145 s)
+steps 600000  mean episode reward nan  (217 s)
+steps 800000  mean episode reward nan  (283 s)
+steps 1000000  mean episode reward nan  (349 s)
+steps 1200000  mean episode reward nan  (393 s)
+steps 1400000  mean episode reward nan  (419 s)
+steps 1600000  mean episode reward nan  (443 s)
+steps 1800000  mean episode reward nan  (468 s)
+steps 2000000  mean episode reward nan  (492 s)
+exported policy_pure.npz

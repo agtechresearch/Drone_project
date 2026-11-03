@@ -1,0 +1,57 @@
+{
+ "variant": "pure",
+ "steps": 2000000,
+ "log": [
+  {
+   "steps": 200000,
+   "ep_reward": NaN,
+   "sec": 80.43574404716492
+  },
+  {
+   "steps": 400000,
+   "ep_reward": NaN,
+   "sec": 144.5337016582489
+  },
+  {
+   "steps": 600000,
+   "ep_reward": NaN,
+   "sec": 217.26451873779297
+  },
+  {
+   "steps": 800000,
+   "ep_reward": NaN,
+   "sec": 283.1287262439728
+  },
+  {
+   "steps": 1000000,
+   "ep_reward": NaN,
+   "sec": 349.28575921058655
+  },
+  {
+   "steps": 1200000,
+   "ep_reward": NaN,
+   "sec": 393.0168299674988
+  },
+  {
+   "steps": 1400000,
+   "ep_reward": NaN,
+   "sec": 418.90902304649353
+  },
+  {
+   "steps": 1600000,
+   "ep_reward": NaN,
+   "sec": 442.82553219795227
+  },
+  {
+   "steps": 1800000,
+   "ep_reward": NaN,
+   "sec": 468.0118143558502
+  },
+  {
+   "steps": 2000000,
+   "ep_reward": NaN,
+   "sec": 491.7862811088562
+  }
+ ],
+ "rule_params": null
+}
