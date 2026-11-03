@@ -1,0 +1,148 @@
+#!/bin/sh
+#
+# @name ModalAI Starling 2 (gz SITL, CAD geometry)
+#
+# @type Quadrotor
+# @class Copter
+#
+# @maintainer Starling SITL / agtechlab
+#
+
+. ${R}etc/init.d/rc.mc_defaults
+
+PX4_SIMULATOR=${PX4_SIMULATOR:=gz}
+PX4_GZ_WORLD=${PX4_GZ_WORLD:=default}   # NOTE: was qvix until 2026-10-16 -> "empty world" runs silently used the QVIX world (wall at x=0.5 next to the origin)
+PX4_SIM_MODEL=${PX4_SIM_MODEL:=starling2}
+
+param set-default SIM_GZ_EN 1
+
+# Estimation like the real vehicle: VIO (ground-truth odometry from gz), no GPS.
+# PX4's simulated GPS has hard-coded 0.2 m horizontal / 0.5 m vertical noise, which made height and position tracking useless indoors.
+param set-default SENS_EN_GPSSIM 0
+param set-default SENS_EN_BAROSIM 0
+# Heading like the real vehicle: VIO only, no magnetometer. On the Starling 2 the VIO frame's x axis is the camera/forward direction
+# at power-on, so "north" (yaw 0) = initial heading; run_sitl.sh spawns facing north to reproduce that (gz odometry is world-fixed).
+param set-default SENS_EN_MAGSIM 0
+param set-default EKF2_MAG_TYPE 5
+param set-default SYS_HAS_MAG 0        # otherwise the preflight check 'Compass Sensor 0 missing' refuses to arm (2026-10-16 13:03 run)
+param set-default EKF2_GPS_CTRL 0
+param set-default EKF2_EV_CTRL 15
+param set-default EKF2_HGT_REF 3
+param set-default EKF2_EVP_NOISE 0.1       # real vehicle values (handoff_2026-10-27); real uses EKF2_EV_CTRL 7 (no EV yaw) - kept 15 here so EKF yaw = truth
+param set-default EKF2_EVV_NOISE 0.1
+param set-default EKF2_EVA_NOISE 0.1
+param set-default EKF2_EV_DELAY 0
+# (EKF2_EV_QMIN 1 on the real vehicle: NOT applied - gz odometry reports quality 0, EV fusion would be rejected -> no local position, arming denied 2026-10-27 18:38)
+param set-default COM_ARM_WO_GPS 1
+# (COM_MODE_ARM_CHK does not exist in v1.15.4; arming without GPS works because run_sitl.sh sends SET_GPS_GLOBAL_ORIGIN after boot.)
+
+# Control allocation - rotor hubs measured from ModalAI D0014 Starling 2-C26 STEP (PX4 FRD frame, y right)
+param set-default CA_AIRFRAME 0
+param set-default CA_ROTOR_COUNT 4
+param set-default CA_ROTOR0_PX 0.066
+param set-default CA_ROTOR0_PY 0.088
+param set-default CA_ROTOR0_KM 0.05
+param set-default CA_ROTOR1_PX -0.066
+param set-default CA_ROTOR1_PY -0.088
+param set-default CA_ROTOR1_KM 0.05
+param set-default CA_ROTOR2_PX 0.066
+param set-default CA_ROTOR2_PY -0.088
+param set-default CA_ROTOR2_KM -0.05
+param set-default CA_ROTOR3_PX -0.066
+param set-default CA_ROTOR3_PY 0.088
+param set-default CA_ROTOR3_KM -0.05
+
+param set-default SIM_GZ_EC_FUNC1 101
+param set-default SIM_GZ_EC_FUNC2 102
+param set-default SIM_GZ_EC_FUNC3 103
+param set-default SIM_GZ_EC_FUNC4 104
+param set-default SIM_GZ_EC_MIN1 150
+param set-default SIM_GZ_EC_MIN2 150
+param set-default SIM_GZ_EC_MIN3 150
+param set-default SIM_GZ_EC_MIN4 150
+param set-default SIM_GZ_EC_MAX1 1000
+param set-default SIM_GZ_EC_MAX2 1000
+param set-default SIM_GZ_EC_MAX3 1000
+param set-default SIM_GZ_EC_MAX4 1000
+
+# ---- Real Starling 2 parameters (handoff_2026-10-27: voxl-px4 1.14.0, params/starling2_sitl_param_set.txt). Applied 2026-10-27.
+# thrust / hover
+param set-default THR_MDL_FAC 0.9
+param set-default MPC_THR_HOVER 0.34
+param set-default MPC_THR_MIN 0.07
+param set-default MPC_THR_MAX 0.6
+# position / velocity control
+param set-default MPC_POS_MODE 4
+param set-default MPC_XY_P 3.5
+param set-default MPC_Z_P 5.0
+param set-default MPC_XY_VEL_P_ACC 3.0
+param set-default MPC_XY_VEL_I_ACC 0.1
+param set-default MPC_XY_VEL_D_ACC 0.0
+param set-default MPC_Z_VEL_P_ACC 8.0
+param set-default MPC_Z_VEL_I_ACC 2.0
+param set-default MPC_XY_VEL_MAX 5.0
+param set-default MPC_XY_CRUISE 5.0
+param set-default MPC_Z_VEL_MAX_UP 3.0
+param set-default MPC_Z_VEL_MAX_DN 1.5
+param set-default MPC_Z_V_AUTO_UP 0.5
+param set-default MPC_Z_V_AUTO_DN 0.5
+param set-default MPC_ACC_HOR 3.0
+param set-default MPC_ACC_HOR_MAX 1000.0
+param set-default MPC_ACC_UP_MAX 3.0
+param set-default MPC_ACC_DOWN_MAX 3.0
+param set-default MPC_JERK_MAX 40.0
+param set-default MPC_JERK_AUTO 4.0
+param set-default MPC_TILTMAX_AIR 30.0
+param set-default MPC_TILTMAX_LND 12.0
+param set-default MPC_YAWRAUTO_MAX 45.0
+param set-default MPC_TKO_SPEED 0.5
+param set-default MPC_TKO_RAMP_T 1.0
+param set-default MPC_LAND_SPEED 0.6
+param set-default MPC_LAND_ALT1 10.0
+param set-default MPC_LAND_ALT2 5.0
+param set-default MPC_LAND_ALT3 1.0
+param set-default MIS_TAKEOFF_ALT 0.5
+# attitude / rate control (real tuning; sim inertia is a box estimate - revert this block if the sim oscillates)
+param set-default MC_ROLL_P 16.0
+param set-default MC_PITCH_P 16.0
+param set-default MC_YAW_P 2.8
+param set-default MC_ROLLRATE_P 0.072
+param set-default MC_ROLLRATE_I 0.171
+param set-default MC_ROLLRATE_D 0.0009
+param set-default MC_ROLLRATE_MAX 130.0
+param set-default MC_PITCHRATE_P 0.097
+param set-default MC_PITCHRATE_I 0.228
+param set-default MC_PITCHRATE_D 0.0011
+param set-default MC_PITCHRATE_MAX 130.0
+param set-default MC_YAWRATE_P 0.15
+param set-default MC_YAWRATE_I 0.5
+param set-default MC_YAWRATE_D 0.0
+param set-default MC_YAWRATE_K 1.0
+param set-default MC_YAWRATE_MAX 150.0
+# commander / landing
+param set-default COM_DISARM_LAND 0.1
+param set-default COM_DISARM_PRFLT 20.0
+param set-default COM_SPOOLUP_TIME 2.0
+param set-default COM_OF_LOSS_T 1.0
+param set-default LNDMC_ROT_MAX 30.0
+param set-default LNDMC_TRIG_TIME 0.5
+param set-default LNDMC_XY_VEL_MAX 1.5
+param set-default LNDMC_Z_VEL_MAX 0.25
+param set-default MIS_YAW_ERR 12.0
+param set-default NAV_ACC_RAD 10.0
+# battery (2S 3950 mAh) - sim battery is ideal, kept for parity
+param set-default BAT1_N_CELLS 2
+param set-default BAT1_CAPACITY 3950
+param set-default BAT1_V_CHARGED 4.1
+param set-default BAT1_V_EMPTY 2.8
+param set-default BAT1_R_INTERNAL 0.022
+
+# EKF2 - IMU offset (real EKF2_IMU_POS_*, handoff_2026-10-27)
+param set-default EKF2_IMU_POS_X 0.0043
+param set-default EKF2_IMU_POS_Y 0.0073
+param set-default EKF2_IMU_POS_Z -0.016
+
+# same as the real vehicle
+param set-default IMU_GYRO_RATEMAX 800
+param set-default MAV_TYPE 2
+param set-default MC_AT_EN 1
