@@ -59,6 +59,7 @@ ModalAI **Starling 2**(온보드 VOXL2) 드론에 **장애물 회피 · 안전�
 | [`docs/09`](docs/09_marker_drift_experiment_plan.md) | 마커 기반 드리프트 측정 실험계획서 (연구실 3조건 + 현장 2단계 골격) |
 | [`docs/09 brief`](docs/09_marker_drift_experiment_brief.md) | 위 계획서의 랩미팅 보고용 요약 |
 | [`docs/10`](docs/10_drone_survey_marker_drift.md) | 기체 실측 조사 (카메라·캘리브레이션·태그 검출기·voxl-logger 형식·네트워크, 2026-09-23) |
+| [`docs/11`](docs/11_voxl_readonly_collection.md) | VOXL 읽기 전용 수집 지시서 (설정·파라미터·mavsdk_server 구성·MPA 원시 기록, 2026-11-03). 도구 `flight/tools_onboard/mpa_capture.py` |
 | [`docs/guide/`](docs/guide/) | Starling 2 **메인 가이드**(실사용) · **기술 문서**(시스템 구조·SW 스택). md 원본 + `_작성본` docx/pdf |
 
 날짜별 작업 기록은 [`worklog/`](worklog/).
