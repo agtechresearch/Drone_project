@@ -21,7 +21,8 @@ cigr2026/
 │       ├── poster/                      # 본 실험 로그 (v16, 6/17 20:30~21:31)
 │       ├── baseline_poster/             # 대조군 로그 (baseline_v14, 6/17~6/22)
 │       └── poster_fgure/                # check_loiter_poster.py 출력 그림·report
-└── test17/                     # v17 비행 로그 (6/17 17:21~17:32)
+├── test17/                     # v17 비행 로그 (6/17 17:21~17:32)
+└── fc_dataflash/               # FC(ArduPilot) dataflash .BIN 7개 — 본실험 4회·대조군 5회 포함, 로그↔비행 매칭표 (README 참조)
 ```
 
 ## 비행 영상
