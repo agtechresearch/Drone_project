@@ -1,0 +1,47 @@
+GUST | controller | planned/completed/failed/invalid | peak/F (|F|>=0.15) | peak/F all | return s median (not returned) | lat max | reward
+  PX4 alone | 10/9/0/1 | 0.393 | 0.472 | 1.25 (1) | 0.095 | -21.27
+  PPO PD | 10/9/0/1 | 0.175 | 0.266 | 0.22 (0) | 0.046 | -4.62
+  PPO Gazebo v042 | 10/9/0/1 | 0.369 | 0.375 | 0.21 (0) | 0.093 | -15.89
+  PPO sur scratch | 10/8/0/2 | 0.138 | 0.298 | 0.47 (2) | 0.045 | -5.20
+  PPO sur bc | 10/9/0/1 | 0.118 | 0.288 | 0.11 (2) | 0.044 | -5.70
+  PPO sur bcrand | 10/9/0/1 | 0.169 | 0.314 | 0.55 (2) | 0.044 | -4.86
+  PX4 MPC_XY_P 5.25 | 10/10/0/0 | 0.308 | 0.348 | 0.90 (2) | 0.081 | -10.42
+  PX4 MPC_XY_P 8.75 | 10/8/0/2 | 0.214 | 0.233 | 0.32 (0) | 0.048 | -3.04
+NONE | controller | planned/completed/failed/invalid | lateral RMS cm | lat max cm | reward
+  PX4 alone | 3/3/0/0 | 1.179 | 1.87 | -2.31
+  PPO PD | 3/3/0/0 | 0.753 | 1.30 | -1.06
+  PPO Gazebo v042 | 3/2/0/1 | 0.417 | 0.97 | -0.28
+  PPO sur scratch | 3/2/0/1 | 0.515 | 1.03 | -0.43
+  PPO sur bc | 3/3/0/0 | 0.379 | 0.87 | -0.31
+  PPO sur bcrand | 3/3/0/0 | 0.513 | 1.09 | -0.45
+  PX4 MPC_XY_P 5.25 | 3/3/0/0 | 0.746 | 1.56 | -0.91
+  PX4 MPC_XY_P 8.75 | 3/3/0/0 | 0.366 | 0.81 | -0.22
+paired gust over 6 seeds [950000, 950001, 950006, 950007, 950008, 950009]
+  PX4 alone | reward -12.68 | lat max 0.070
+  PPO PD | reward -4.32 | lat max 0.037 | vs PX4: reward +8.36 (sd 15.32), lat max -0.033
+  PPO Gazebo v042 | reward -9.42 | lat max 0.061 | vs PX4: reward +3.25 (sd 4.57), lat max -0.009
+  PPO sur scratch | reward -5.86 | lat max 0.041 | vs PX4: reward +6.81 (sd 20.72), lat max -0.029
+  PPO sur bc | reward -7.48 | lat max 0.043 | vs PX4: reward +5.20 (sd 23.01), lat max -0.027
+  PPO sur bcrand | reward -4.68 | lat max 0.038 | vs PX4: reward +7.99 (sd 18.24), lat max -0.032
+  PX4 MPC_XY_P 5.25 | reward -6.08 | lat max 0.055 | vs PX4: reward +6.59 (sd 9.40), lat max -0.015
+  PX4 MPC_XY_P 8.75 | reward -2.52 | lat max 0.038 | vs PX4: reward +10.16 (sd 14.56), lat max -0.032
+paired none over 2 seeds [955000, 955002]
+  PX4 alone | reward -2.15 | lat max 0.018
+  PPO PD | reward -0.87 | lat max 0.012 | vs PX4: reward +1.29 (sd 0.28), lat max -0.006
+  PPO Gazebo v042 | reward -0.28 | lat max 0.010 | vs PX4: reward +1.87 (sd 0.95), lat max -0.009
+  PPO sur scratch | reward -0.43 | lat max 0.010 | vs PX4: reward +1.73 (sd 0.96), lat max -0.008
+  PPO sur bc | reward -0.42 | lat max 0.010 | vs PX4: reward +1.73 (sd 1.34), lat max -0.008
+  PPO sur bcrand | reward -0.33 | lat max 0.009 | vs PX4: reward +1.82 (sd 0.85), lat max -0.009
+  PX4 MPC_XY_P 5.25 | reward -1.06 | lat max 0.016 | vs PX4: reward +1.09 (sd 0.83), lat max -0.003
+  PX4 MPC_XY_P 8.75 | reward -0.18 | lat max 0.008 | vs PX4: reward +1.97 (sd 0.96), lat max -0.011
+INVALID PX4 alone gust hg_evsur_g2 ep 5 seed 950002: PX4 yaw - truth yaw 4.61 deg at ready (tol 3.0)
+INVALID PPO PD gust hg_evsur_g3 ep 5 seed 950003: PX4 yaw - truth yaw -3.13 deg at ready (tol 3.0)
+INVALID PPO Gazebo v042 gust hg_evsur_g5 ep 4 seed 950005: PX4 yaw - truth yaw -5.67 deg at ready (tol 3.0)
+INVALID PPO Gazebo v042 none hg_evsur_n1 ep 4 seed 955001: PX4 yaw - truth yaw -5.81 deg at ready (tol 3.0)
+INVALID PPO sur scratch gust hg_evsur_g2 ep 2 seed 950002: PX4 yaw - truth yaw 3.13 deg at ready (tol 3.0)
+INVALID PPO sur scratch gust hg_evsur_g5 ep 5 seed 950005: PX4 yaw - truth yaw -8.44 deg at ready (tol 3.0)
+INVALID PPO sur scratch none hg_evsur_n1 ep 5 seed 955001: PX4 yaw - truth yaw -11.31 deg at ready (tol 3.0)
+INVALID PPO sur bc gust hg_evsur_g2 ep 3 seed 950002: PX4 yaw - truth yaw 4.36 deg at ready (tol 3.0)
+INVALID PPO sur bcrand gust hg_evsur_g2 ep 4 seed 950002: PX4 yaw - truth yaw 4.87 deg at ready (tol 3.0)
+INVALID PX4 MPC_XY_P 8.75 gust hg_evxp875_0 ep 3 seed 950003: PX4 yaw - truth yaw -4.20 deg at ready (tol 3.0)
+INVALID PX4 MPC_XY_P 8.75 gust hg_evxp875_0 ep 4 seed 950004: PX4 yaw - truth yaw -5.01 deg at ready (tol 3.0)

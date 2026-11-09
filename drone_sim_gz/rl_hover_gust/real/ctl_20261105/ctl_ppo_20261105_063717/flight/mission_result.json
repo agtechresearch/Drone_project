@@ -1,0 +1,25 @@
+{
+ "run_id": "20261105_063722_pid12015",
+ "outcome": "complete",
+ "detail": "all 2 stages passed",
+ "first_failed_stage": null,
+ "stages": [
+  "takeoff:ok",
+  "forward:ok"
+ ],
+ "armed_requested": true,
+ "arm_prep": true,
+ "arm_state": "acked",
+ "land_request": "sent",
+ "land_reason": "mission end",
+ "land_failures": [],
+ "landing": "confirmed",
+ "disarm": "done",
+ "disarm_check": "disarmed",
+ "operator_handover": false,
+ "operator_takeover": null,
+ "stop_finished_by": null,
+ "notes": [],
+ "report_error": null,
+ "exit": 0
+}

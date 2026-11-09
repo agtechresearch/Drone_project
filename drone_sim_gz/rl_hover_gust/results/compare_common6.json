@@ -1,0 +1,79 @@
+{
+ "gust": {
+  "seeds": [
+   950000,
+   950001,
+   950004,
+   950006,
+   950007,
+   950008,
+   950009
+  ],
+  "PX4 alone": {
+   "n_gust15": 5,
+   "peak15_mean": 0.395664078320076,
+   "n_gust": 10,
+   "peak_mean": 0.4990639982671311
+  },
+  "PPO PD": {
+   "n_gust15": 5,
+   "peak15_mean": 0.1772793425019398,
+   "n_gust": 10,
+   "peak_mean": 0.2788221638061865
+  },
+  "PPO Gazebo v042": {
+   "n_gust15": 5,
+   "peak15_mean": 0.3726736359969257,
+   "n_gust": 10,
+   "peak_mean": 0.3867600937641544
+  },
+  "PPO sur scratch": {
+   "n_gust15": 5,
+   "peak15_mean": 0.13955524731681515,
+   "n_gust": 10,
+   "peak_mean": 0.32033600837242054
+  },
+  "PPO sur bc": {
+   "n_gust15": 5,
+   "peak15_mean": 0.11953195345253123,
+   "n_gust": 10,
+   "peak_mean": 0.3382789735039736
+  },
+  "PPO sur bcrand": {
+   "n_gust15": 5,
+   "peak15_mean": 0.1786456410705837,
+   "n_gust": 10,
+   "peak_mean": 0.3563764685782065
+  }
+ },
+ "none": {
+  "seeds": [
+   955000,
+   955002
+  ],
+  "PX4 alone": {
+   "n": 2,
+   "rms_cm_mean": 1.1270264851326113
+  },
+  "PPO PD": {
+   "n": 2,
+   "rms_cm_mean": 0.652972819297346
+  },
+  "PPO Gazebo v042": {
+   "n": 2,
+   "rms_cm_mean": 0.4169024611294091
+  },
+  "PPO sur scratch": {
+   "n": 2,
+   "rms_cm_mean": 0.514841235109247
+  },
+  "PPO sur bc": {
+   "n": 2,
+   "rms_cm_mean": 0.449680228315558
+  },
+  "PPO sur bcrand": {
+   "n": 2,
+   "rms_cm_mean": 0.4465076081919235
+  }
+ }
+}

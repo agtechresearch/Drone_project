@@ -1,0 +1,22 @@
+# Vehicle files for the real comparison flight (2026-11-09). One line per file:
+#   <path under /data/claude_collect/tools_safe/> | <source in this tree> | <deployed by: deploy_ctl.sh or prereq> | <sha256> | <hash source>
+# 'flight-record' = equal to code_sha256.txt of the 2026-11-05 flights (real/ctl_20261105/*/code_sha256.txt); 'source' = this tree,
+# vehicle copy not hashed at flight time. Outside tools_safe: /home/root/path_flight_phase1_v13.py (vehicle original, not in this
+# repository) sha256 ea9af9557ab14d44ed2d23210936b56fc9f81e044e155fdf2a8161bfe20a8a3e (flight-record). Static check: real/check_vehicle_files.py
+ctl_flight.sh | real/ctl_flight.sh | deploy_ctl.sh | d50af67e47edd0b11bef0ef23f87086b2b9ddcb622c84c238496046826d507f8 | flight-record
+ctl_run.sh | real/ctl_run.sh | deploy_ctl.sh | e1aa6a9fd67b2f88c06c7c549a7257dd1d3a4fdd3feb11621ce5977a8b0f8f1d | flight-record
+ctl_patch.py | real/ctl_patch.py | deploy_ctl.sh | 17c00b0c6c3430cd33a50d792ffc5a9225148f039b2b1a871a494214d8d9322a | flight-record
+real_ctl_safe.py | real/real_ctl_safe.py | deploy_ctl.sh | 00748e27265365d8f7cc0844b1c8ba28421726ade05815eba86158d30fb2adc6 | flight-record
+policy_runtime.py | rl_demo/policy_runtime.py | deploy_ctl.sh | 95c19135effbb63bbf62249001a6903d9b3b0956428ec0c17d0dfd9fbde85c58 | flight-record
+policies/pd_imit.json | surrogate/selected/pd_imit.json | deploy_ctl.sh | fa8f098f9badb3f04bbc5abbead2cec76169c6c7f7d536951b34de3f61041f28 | flight-record
+policies/sur_bcrand_s2.json | surrogate/selected/sur_bcrand_s2.json | deploy_ctl.sh | 1918645bb53c080522451c8892fd4d6053b53355a6d80fe50db14348b56c7dfc | flight-record
+real_flight_safe.py | scripts/real_flight_safe.py | prereq | e89a6c6ed9fd12cb1a0f123826573e956cbd11654ecfafcd3ce31f7c792fbaad | flight-record
+safety_patch.py | scripts/safety_patch.py | prereq | 6280325ef537a5261ea4267a024514f0bcf1f286358cdcb568166055b818b46e | flight-record
+step2_check.sh | real/step2/step2_check.sh | prereq | 3f9526cc0f5eefdc40e82bc2eb307caf961dc267368db40c903849d20791d094 | source
+hover_plan_check.py | real/step2/hover_plan_check.py | prereq | ad1a077c6d752a6cb3881baf2d355b9cc0abbdc394919e5d297d53a479310f7d | source
+hover_record.py | real/hover_record.py | prereq | da2c19442921e415b7b31ec202bb6c8c2a9b793c9588e0b4e4c1cebd327d6bd5 | source
+mpa_capture.py | real/mpa_capture.py | prereq | a6a534abc110616fe4d0059141328defe2d3f3dd2c7ee5a5b4aff8a99a8f23e6 | source
+hover_summary.py | real/hover_summary.py | prereq | 2bd31e4f49d4566c4d9eda4a4393a89522acd947a5bd663fee39cf4bfb7b328b | source
+tag_ref.py | real/tag_ref.py | prereq | bca01651bd5c44ad2ca97b9375eeada41054bcbf2ef22c5e25884b529b50878b | source
+tag_step1.py | real/tag_step1.py | prereq | ca6f91f2b39a7704a78e5abf8bcdf8b90332935ca7c2e7200be31d327fb1d9f4 | source
+fan_mark.py | real/fan_mark.py | prereq | 72a84f9b05a981bab7060a09d78c46187858974d4bfcb1cc3fea1abe4f130e81 | source

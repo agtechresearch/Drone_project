@@ -1,0 +1,54 @@
+{
+ "ctrl": "ppo",
+ "options": {
+  "ctrl": "ppo",
+  "policy": "/data/claude_collect/tools_safe/policies/sur_bcrand_s2.json",
+  "delta_max_m": 0.2,
+  "delta_rate_m_s": 1.0,
+  "settle_s": 3.0,
+  "end_s": 2.0,
+  "e_stop_m": 0.3,
+  "stale_s": 0.3,
+  "yaw_max_deg": 10.0,
+  "log_dir": "/data/claude_collect/ctl_ppo_20261105_063140/flight/ctl"
+ },
+ "policy_sha256": "1918645bb53c080522451c8892fd4d6053b53355a6d80fe50db14348b56c7dfc",
+ "policy_version": "sur_final",
+ "events": [
+  {
+   "t": 0.0,
+   "kind": "start",
+   "detail": "ppo hover 40.0 s, base N+0.025 E-0.083 D-1.071 yaw 0.0"
+  },
+  {
+   "t": 3.002,
+   "kind": "active",
+   "detail": "e_err -0.010 ve -0.020 roll +0.78 yaw 0.1"
+  },
+  {
+   "t": 38.002,
+   "kind": "ramp",
+   "detail": "delta +0.005 -> 0"
+  },
+  {
+   "t": 40.003,
+   "kind": "end",
+   "detail": "400 steps, correction ran to the end"
+  }
+ ],
+ "installed_wall": 1793860304.599478,
+ "used": true,
+ "base_ned_yaw": [
+  0.02484094612300396,
+  -0.08288954272866249,
+  -1.0706632733345032,
+  0.0
+ ],
+ "duration_s": 40.0,
+ "t0_mono": 478.04310308,
+ "t0_wall": 1793860325.7379515,
+ "roll_source": "MAVSDK attitude_euler (own subscriber)",
+ "steps": 400,
+ "off": null,
+ "att_msgs": 800
+}
