@@ -20,6 +20,7 @@
 | `cad_pipeline/` | ModalAI STEP → 기체 메시(STL) 변환 |
 | `docker/` | 두 컨테이너의 Dockerfile·빌드·실행 스크립트 |
 | `v3_marker/` | 현재 작업. ToF·AprilTag 기반 위치·헤딩 보정, 지도 기반 추정기, 측량 비행, 안전장치, 실기 입력 도구 |
+| [`rl_hover_gust/`](rl_hover_gust/) | 측풍 호버 강화학습. PX4 위에 PPO 정책이 목표 위치 보정량을 더함. Gazebo·대리모델 학습, 시뮬 같은 바람 비교, 실물 선풍기 비교(최대 밀림 중앙값 7.17 → 4.46 cm). **[`rl_hover_gust/README.md`](rl_hover_gust/README.md)** |
 
 `v3_marker/` 주요 구성 (진입점 목록: [`v3_marker/scripts/ENTRYPOINTS.md`](v3_marker/scripts/ENTRYPOINTS.md))
 ```

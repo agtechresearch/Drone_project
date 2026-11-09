@@ -10,5 +10,5 @@
 | [`neo_servo/`](neo_servo/) | **DJI Neo** — 폐쇄 스택 기체에 Bee35 정렬 방식 이식. scrcpy 미러링 + AprilTag + pyautogui 스틱 스트리밍 비주얼 서보 |
 | [`advancedroneprograming/`](advancedroneprograming/) | **Tello** — 얼굴 추적, 핸드 제스처 제어, 영상 기록 |
 | [`drone_sim/`](drone_sim/) | 시뮬레이션 환경 및 이륙 스크립트 |
-| [`drone_sim_gz/`](drone_sim_gz/) | **Starling 2 SITL (gz Harmonic + PX4 v1.15)** — QVIX 통로 비행, ToF·AprilTag 위치·헤딩 보정, 측량 비행, 안전장치. 실기 비행 코드 수정 없이 실행 |
+| [`drone_sim_gz/`](drone_sim_gz/) | **Starling 2 SITL (gz Harmonic + PX4 v1.15)** — QVIX 통로 비행, ToF·AprilTag 위치·헤딩 보정, 측량 비행, 안전장치. 실기 비행 코드 수정 없이 실행. 측풍 호버 강화학습(PPO 목표 보정, 시뮬→실물)은 [`drone_sim_gz/rl_hover_gust/`](drone_sim_gz/rl_hover_gust/) |
 | [`mobile_robot_station/`](mobile_robot_station/) | **모바일 로봇 (myAGV)** — 이동형 드론 스테이션·딸기 적재용 메카넘 로봇 자율주행. gmapping SLAM + AMCL + move_base (RPi4B, ROS Noetic) |
