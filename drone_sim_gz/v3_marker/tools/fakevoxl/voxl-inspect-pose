@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+"""Fake `voxl-inspect-pose -n <pipe>` for SITL (2026-11-01): prints the lines voxl_relay.py sends to UDP FAKEVOXL_PORT + pipe index.
+Only on PATH of the real-launcher SITL tests (v3_marker/logs/run_real_voxl_sitl.sh); never deployed."""
+import os, socket, sys
+sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+# one UDP port per pipe (v13 starts one reader per pipe; a shared port would feed only one of them):
+# port = FAKEVOXL_PORT + index of the pipe in PIPES (unknown pipes: +2)
+PIPES = ["px4_vehicle_local_position", "vvhub_body_wrt_local"]
+pipe = sys.argv[sys.argv.index("-n") + 1] if "-n" in sys.argv and len(sys.argv) > sys.argv.index("-n") + 1 else ""
+sk.bind(("127.0.0.1", int(os.environ.get("FAKEVOXL_PORT", "14722")) + (PIPES.index(pipe) if pipe in PIPES else 2)))
+print("timestamp(ms)| position (m) | roll pitch yaw (deg) | velocity (m/s) | angular rate (rad/s)", flush=True)
+while True:
+    sys.stdout.write(sk.recv(512).decode()); sys.stdout.flush()

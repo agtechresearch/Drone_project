@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Survey-test worlds (v3_marker, 2026-10-31): the SAME QVIX module turned by a different yaw, with every AprilTag stuck on its
+post a little off the design position, as a person would. The flight still uses the DESIGN map (gz/tags_map.json); the true
+tag poses are written beside the world for the evaluation only.
+  python3 make_survey_world.py <name> <yaw_deg> <seed> [--dy 0.015] [--dz 0.04] [--dx 0.003] [--roll 5] [--tilt 2] [--install]
+    dy    along the face (left/right on the 50 mm post), uniform +-dy (m)
+    dz    up/down, uniform +-dz (m)
+    dx    stand-off from the post front (tape, uneven post), uniform 0..dx (m) on top of the design 9 mm
+    roll  in-plane rotation of the printed square (deg), tilt  out-of-plane turn about the vertical (deg)
+Writes v3_marker/gz/models/qvix_tags_<name>/, gz/worlds/qvix_<name>.sdf, gz/survey/<name>_truth.json; --install copies the
+model and world into the PX4 tree (additive: Tools/simulation/gz/{models,worlds}). Fly it with WK_WORLD=qvix_<name>
+QVIX_YAW_DEG=<yaw_deg>."""
+import argparse, json, math, os, re, shutil, sys
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__)); V3 = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+import qvix_grid as G  # noqa: E402
+
+p = argparse.ArgumentParser()
+p.add_argument("name"); p.add_argument("yaw", type=float); p.add_argument("seed", type=int)
+p.add_argument("--dy", type=float, default=0.015); p.add_argument("--dz", type=float, default=0.04)
+p.add_argument("--dx", type=float, default=0.003); p.add_argument("--roll", type=float, default=5.0)
+p.add_argument("--tilt", type=float, default=2.0); p.add_argument("--install", action="store_true")
+p.add_argument("--rack-shift", help="LINE,DX,DYAW: move R1 rack line LINE (0..3, west to east) by DX m across the aisles and turn it "
+               "DYAW deg (CCW, about its centre); its two faces and their tags move with it. Needs trimesh (cad venv)")
+a = p.parse_args()
+
+nominal = json.load(open(os.path.join(V3, "gz", "tags_map.json")))
+# --- optional moved rack line (R1): rigid transform of the line's mesh, faces and tags
+SHIFT = None
+if a.rack_shift:
+    li, sdx, syaw = a.rack_shift.split(","); li = int(li); sdx = float(sdx); syaw = float(syaw)
+    rx0, rx1 = G.RACKS_X[li]; ry0, ry1 = G.ROOMS["R1"]["racks_y"]
+    cols = list(G.AISLES)
+    SHIFT = {"line": li, "dx": sdx, "dyaw_deg": syaw, "centre": [0.5 * (rx0 + rx1), 0.5 * (ry0 + ry1)],
+             "faces": [cols[li] + "E", cols[li + 1] + "W"]}
+
+
+def shift_xy(x, y):
+    """rack transform: turn about the line centre, then dx across the aisles"""
+    c, s_ = math.cos(math.radians(SHIFT["dyaw_deg"])), math.sin(math.radians(SHIFT["dyaw_deg"]))
+    cx, cy = SHIFT["centre"]
+    return cx + c * (x - cx) - s_ * (y - cy) + SHIFT["dx"], cy + s_ * (x - cx) + c * (y - cy)
+TAG_PRINT = nominal["size_m"] * 10 / 8
+rng = np.random.default_rng(a.seed)
+src_tex = os.path.join(V3, "gz", "models", "qvix_tags", "materials", "textures")
+mname = "qvix_tags_" + a.name
+mdir = os.path.join(V3, "gz", "models", mname); tdir = os.path.join(mdir, "materials", "textures")
+if os.path.isdir(mdir):
+    shutil.rmtree(mdir)                       # generated output, rebuilt from the seed
+os.makedirs(tdir)
+truth = {}; links = ""
+for k, tg in sorted(nominal["tags"].items(), key=lambda kv: int(kv[0])):
+    tid = int(k); nrm = tg["normal"]
+    ddy = float(rng.uniform(-a.dy, a.dy)); ddz = float(rng.uniform(-a.dz, a.dz))
+    # the tilted square must stay in front of the post: half-print * sin(tilt) extra stand-off
+    ddx = float(rng.uniform(0.0, a.dx)) + 0.5 * TAG_PRINT * math.sin(math.radians(a.tilt))
+    roll = float(rng.uniform(-a.roll, a.roll)); tilt = float(rng.uniform(-a.tilt, a.tilt))
+    x, y, z = tg["x"] + nrm * ddx, tg["y"] + ddy, tg["z"] + ddz
+    yaw = (0.0 if nrm > 0 else math.pi) + math.radians(tilt)
+    if SHIFT and tg["face"] in SHIFT["faces"]:
+        x, y = shift_xy(x, y); yaw += math.radians(SHIFT["dyaw_deg"])
+    fn = "tag_%02d.png" % tid
+    shutil.copy(os.path.join(src_tex, fn), os.path.join(tdir, fn))
+    links += """    <link name="tag_%02d">
+      <pose>%.4f %.4f %.4f %.6f 0 %.6f</pose>
+      <visual name="v">
+        <geometry><box><size>0.002 %.4f %.4f</size></box></geometry>
+        <material><diffuse>1 1 1 1</diffuse><ambient>1 1 1 1</ambient><emissive>0 0 0 1</emissive>
+          <pbr><metal><albedo_map>model://%s/materials/textures/%s</albedo_map><metalness>0</metalness><roughness>1</roughness></metal></pbr>
+        </material>
+        <cast_shadows>false</cast_shadows>
+      </visual>
+    </link>
+""" % (tid, x, y, z, math.radians(roll), yaw, TAG_PRINT, TAG_PRINT, mname, fn)
+    truth[k] = {"face": tg["face"], "x": round(x, 5), "y": round(y, 5), "z": round(z, 5), "normal": nrm, "roll_deg": round(roll, 3),
+                "tilt_deg": round(tilt, 3), "d_design": [round(x - tg["x"], 5), round(ddy, 5), round(ddz, 5)]}
+open(os.path.join(mdir, "model.sdf"), "w").write("""<?xml version="1.0"?>
+<!-- Generated by v3_marker/scripts/make_survey_world.py %s yaw %g seed %d: AprilTags off their design spots -->
+<sdf version="1.9"><model name="%s"><static>true</static>
+%s</model></sdf>
+""" % (a.name, a.yaw, a.seed, mname, links))
+open(os.path.join(mdir, "model.config"), "w").write("""<?xml version="1.0"?><model><name>%s</name><version>1.0</version>
+<sdf version="1.9">model.sdf</sdf><description>perturbed AprilTags (survey test %s)</description></model>
+""" % (mname, a.name))
+
+wname = "qvix_" + a.name
+src = open(os.path.join(os.path.dirname(V3), "repo_export", "gz", "worlds", "qvix.sdf")).read()
+module = "qvix_r_module"
+if SHIFT:
+    # module variant: walls + unmoved racks + the moved line (its own pose); visuals AND collision follow the move
+    import trimesh
+    module = "qvix_r_module_" + a.name
+    PX4GZ = os.path.expanduser("~/starling_sim/PX4-Autopilot/Tools/simulation/gz/models")
+    src_m = os.path.join(PX4GZ, "qvix_r_module", "meshes")
+    vdir = os.path.join(V3, "gz", "models", module); mdir2 = os.path.join(vdir, "meshes")
+    if os.path.isdir(vdir):
+        shutil.rmtree(vdir)
+    os.makedirs(mdir2)
+    shutil.copy(os.path.join(src_m, "qvix_r_walls.stl"), mdir2)
+    racks = trimesh.load(os.path.join(src_m, "qvix_r_racks.stl")).split(only_watertight=False)
+    rx0, rx1 = G.RACKS_X[SHIFT["line"]]
+    moved = [p_ for p_ in racks if rx0 * 1000 - 50 <= p_.centroid[0] <= rx1 * 1000 + 50 and p_.centroid[1] < 11000]
+    other = [p_ for p_ in racks if not any(p_ is q for q in moved)]
+    trimesh.util.concatenate(moved).export(os.path.join(mdir2, "racks_moved.stl"))
+    trimesh.util.concatenate(other).export(os.path.join(mdir2, "racks_other.stl"))
+    th = math.radians(SHIFT["dyaw_deg"]); cx, cy = SHIFT["centre"]
+    px_ = cx + SHIFT["dx"] - (math.cos(th) * cx - math.sin(th) * cy); py_ = cy - (math.sin(th) * cx + math.cos(th) * cy)
+    def el(kind, nm, mesh, pose, col):
+        g = "<geometry><mesh><uri>model://%s/meshes/%s</uri><scale>0.001 0.001 0.001</scale></mesh></geometry>" % (module, mesh)
+        mat = "" if kind == "collision" else "<material><ambient>%s 1</ambient><diffuse>%s 1</diffuse></material>" % col
+        return "      <%s name=\"%s\"><pose>%s</pose>%s%s</%s>\n" % (kind, nm, pose, g, mat, kind)
+    P0 = "0 0 0 0 0 0"; PM = "%.5f %.5f 0 0 0 %.6f" % (px_, py_, th)
+    body = "".join([el("collision", "c_walls", "qvix_r_walls.stl", P0, ""), el("collision", "c_racks", "racks_other.stl", P0, ""),
+                    el("collision", "c_moved", "racks_moved.stl", PM, ""),
+                    el("visual", "walls", "qvix_r_walls.stl", P0, ("0.62 0.60 0.56", "0.88 0.86 0.80")),
+                    el("visual", "racks", "racks_other.stl", P0, ("0.18 0.42 0.20", "0.30 0.68 0.32")),
+                    el("visual", "moved", "racks_moved.stl", PM, ("0.18 0.42 0.20", "0.30 0.68 0.32"))])
+    open(os.path.join(vdir, "model.sdf"), "w").write('<?xml version="1.0"?>\n<!-- make_survey_world.py %s: R1 rack line %d moved dx %g m, yaw %g deg -->\n'
+        '<sdf version="1.9"><model name="%s"><static>true</static><link name="link">\n%s    </link></model></sdf>\n'
+        % (a.name, SHIFT["line"], SHIFT["dx"], SHIFT["dyaw_deg"], module, body))
+    open(os.path.join(vdir, "model.config"), "w").write('<?xml version="1.0"?><model><name>%s</name><version>1.0</version>'
+        '<sdf version="1.9">model.sdf</sdf><description>QVIX R module, R1 rack line moved (survey test)</description></model>\n' % module)
+    src = src.replace("model://qvix_r_module<", "model://%s<" % module)
+src = src.replace('<world name="qvix">', '<world name="%s">' % wname)
+ox, oy, oz = G.MODEL_TO_WORLD
+pose = "%.4f %.4f %.4f 0 0 %.6f" % (ox, oy, oz, math.radians(a.yaw))
+src, n = re.subn(r"(<name>qvix_r_module</name>\s*<pose>)[^<]*(</pose>)", r"\g<1>%s\g<2>" % pose, src)
+assert n == 1, "QVIX include not found"
+src = src.replace('    <light name="sunUTC"', """    <include>
+      <uri>model://%s</uri>
+      <name>%s</name>
+      <pose>%s</pose>
+    </include>
+    <light name="sunUTC\"""" % (mname, mname, pose), 1)
+open(os.path.join(V3, "gz", "worlds", wname + ".sdf"), "w").write(src)
+
+os.makedirs(os.path.join(V3, "gz", "survey"), exist_ok=True)
+tp = os.path.join(V3, "gz", "survey", a.name + "_truth.json")
+d = np.array([v["d_design"] for v in truth.values()])
+json.dump({"name": a.name, "world": wname, "module_yaw_deg": a.yaw, "seed": a.seed,
+           "perturbation": {"dy": a.dy, "dz": a.dz, "dx": a.dx, "roll_deg": a.roll, "tilt_deg": a.tilt},
+           "note": "walls are the design geometry; rack faces too unless rack_shift moved one line (faces_truth)",
+           "rack_shift": SHIFT,
+           "faces_truth": ({f: {"offset": SHIFT["dx"], "turn_deg": -SHIFT["dyaw_deg"], "y_ref": SHIFT["centre"][1]} for f in SHIFT["faces"]}
+                           if SHIFT else {}),
+           "tags": truth}, open(tp, "w"), indent=1)
+print("%s: world %s yaw %g, %d tags, |design error| x %.4f y %.4f z %.4f m (max)" % (
+    a.name, wname, a.yaw, len(truth), *np.abs(d).max(axis=0)))
+if a.install:
+    gz = os.path.expanduser("~/starling_sim/PX4-Autopilot/Tools/simulation/gz")
+    dst = os.path.join(gz, "models", mname)
+    if os.path.isdir(dst):
+        shutil.rmtree(dst)
+    shutil.copytree(mdir, dst); shutil.copy(os.path.join(V3, "gz", "worlds", wname + ".sdf"), os.path.join(gz, "worlds"))
+    if SHIFT:
+        dst2 = os.path.join(gz, "models", module)
+        if os.path.isdir(dst2):
+            shutil.rmtree(dst2)
+        shutil.copytree(os.path.join(V3, "gz", "models", module), dst2); print("installed", dst2)
+    print("installed", dst, os.path.join(gz, "worlds", wname + ".sdf"))

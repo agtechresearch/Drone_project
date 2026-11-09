@@ -1,0 +1,54 @@
+{
+ "ctrl": "zero",
+ "options": {
+  "ctrl": "zero",
+  "policy": null,
+  "delta_max_m": 0.2,
+  "delta_rate_m_s": 1.0,
+  "settle_s": 3.0,
+  "end_s": 2.0,
+  "e_stop_m": 0.3,
+  "stale_s": 0.3,
+  "yaw_max_deg": 10.0,
+  "log_dir": "/data/claude_collect/ctl_px4_20261105_063015/flight/ctl"
+ },
+ "policy_sha256": null,
+ "policy_version": "",
+ "events": [
+  {
+   "t": 0.0,
+   "kind": "start",
+   "detail": "zero hover 40.0 s, base N-0.010 E+0.006 D-1.077 yaw 0.0"
+  },
+  {
+   "t": 3.001,
+   "kind": "active",
+   "detail": "e_err -0.010 ve -0.000 roll +0.66 yaw 0.0"
+  },
+  {
+   "t": 38.001,
+   "kind": "ramp",
+   "detail": "delta +0.000 -> 0"
+  },
+  {
+   "t": 40.001,
+   "kind": "end",
+   "detail": "400 steps, correction ran to the end"
+  }
+ ],
+ "installed_wall": 1793860220.0240777,
+ "used": true,
+ "base_ned_yaw": [
+  -0.01017844509333372,
+  0.005886994348838925,
+  -1.0774334259331226,
+  0.0
+ ],
+ "duration_s": 40.0,
+ "t0_mono": 393.125732921,
+ "t0_wall": 1793860240.8205814,
+ "roll_source": "MAVSDK attitude_euler (own subscriber)",
+ "steps": 400,
+ "off": null,
+ "att_msgs": 800
+}

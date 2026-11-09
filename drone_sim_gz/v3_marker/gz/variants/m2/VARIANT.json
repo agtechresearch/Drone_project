@@ -1,0 +1,17 @@
+{
+ "variant": "m2",
+ "source": "gz/models/starling2_tof",
+ "source_sdf_sha256": "1da10a14773d581563cfa00d98e351961c004caad19fc7d6783b46fe416c5694",
+ "sdf_sha256": "68a3032e33b1b853ad63eedb0dbbca15c99992c1d3823ef6a758e8cff975a044",
+ "mass_sum_before": 0.293,
+ "mass_sum_after": 0.285,
+ "base_link_mass": 0.277,
+ "imu_pose_flu": "0.0043 -0.0073 0.016 0 0 0",
+ "not_changed": [
+  "inertia (box estimate)",
+  "motor constants",
+  "sensors other than the IMU pose",
+  "airframe 4202"
+ ],
+ "use": "WK_MODEL_DIR=/home/dronesim/starling_sim/v3_marker/gz/variants/m2 (run_wk_instance.sh / wk_fly.sh)"
+}

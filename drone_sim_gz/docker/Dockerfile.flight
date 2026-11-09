@@ -1,0 +1,48 @@
+# flight_code 실행 환경 (실기와 동일: Python 3.6.9 + MAVSDK 0.12.0)
+# Base: Ubuntu 18.04 (VOXL2와 같은 계열)
+
+FROM ubuntu:18.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV TZ=Asia/Seoul
+
+# 기본 도구
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    locales tzdata curl wget ca-certificates \
+    software-properties-common sudo git vim nano \
+    python3 python3-pip python3-dev python3-setuptools python3-wheel \
+    net-tools iputils-ping \
+    && locale-gen en_US.UTF-8 \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python 버전 확인 (Ubuntu 18.04는 python3=3.6.9)
+RUN python3 --version && \
+    python3 -c "import sys; assert sys.version_info[:3] == (3,6,9), 'Python version mismatch: {}'.format(sys.version_info)"
+
+# pip 업그레이드 (18.04 기본 pip은 너무 오래됨)
+# 마지막으로 3.6 지원한 pip은 21.3.1
+RUN python3 -m pip install --upgrade "pip<22" "setuptools<60" wheel
+
+# MAVSDK 0.12.0 (실기와 동일)
+RUN python3 -m pip install --no-cache-dir mavsdk==0.12.0
+
+# 실기에서 flight_code가 쓰는 추가 라이브러리 (필요 시 확장)
+RUN python3 -m pip install --no-cache-dir \
+    pyyaml \
+    numpy
+
+# 사용자 계정 (호스트 UID/GID 매칭)
+ARG USER_UID=1000
+ARG USER_GID=1000
+ARG USERNAME=dronesim
+RUN groupadd --gid ${USER_GID} ${USERNAME} && \
+    useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} -s /bin/bash && \
+    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME}
+
+USER ${USERNAME}
+WORKDIR /home/${USERNAME}
+
+CMD ["/bin/bash"]

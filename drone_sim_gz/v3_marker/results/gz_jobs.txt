@@ -1,0 +1,13 @@
+# tag rot drift step policy params
+CW_none_C2 0 0 0 rule results/params_rule_default.json
+CW_none_C3 0 0 0 rule results/params_rule_opt.json
+CW_none_C4b 0 0 0 mlp results/params_mlp_pure.json
+CW_yaw30_C2 3.0 0 0 rule results/params_rule_default.json
+CW_yaw30_C3 3.0 0 0 rule results/params_rule_opt.json
+CW_yaw30_C4b 3.0 0 0 mlp results/params_mlp_pure.json
+CW_drift04_C2 0 0.004 0 rule results/params_rule_default.json
+CW_drift04_C3 0 0.004 0 rule results/params_rule_opt.json
+CW_drift04_C4b 0 0.004 0 mlp results/params_mlp_pure.json
+CW_step10_C2 0 0 0.10 rule results/params_rule_default.json
+CW_step10_C3 0 0 0.10 rule results/params_rule_opt.json
+CW_step10_C4b 0 0 0.10 mlp results/params_mlp_pure.json

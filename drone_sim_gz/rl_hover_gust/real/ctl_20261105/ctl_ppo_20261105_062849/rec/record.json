@@ -1,0 +1,28 @@
+{
+ "pipes": [
+  "tag_detections",
+  "vvhub_body_wrt_local",
+  "px4_vehicle_local_position"
+ ],
+ "max_s": 300.0,
+ "start": [
+  1793860130.6736042,
+  282.978759208
+ ],
+ "pid": 5803,
+ "end": [
+  1793860206.3398807,
+  358.645038509
+ ],
+ "stopped_by": "STOP file",
+ "status": {
+  "tag_detections": "ok",
+  "vvhub_body_wrt_local": "ok",
+  "px4_vehicle_local_position": "ok"
+ },
+ "bytes": {
+  "tag_detections": 58716,
+  "vvhub_body_wrt_local": 162204,
+  "px4_vehicle_local_position": 644364
+ }
+}

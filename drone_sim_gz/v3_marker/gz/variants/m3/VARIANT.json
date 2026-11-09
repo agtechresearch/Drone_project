@@ -1,0 +1,24 @@
+{
+ "variant": "m3",
+ "source": "gz/models/starling2_tof",
+ "source_sdf_sha256": "1da10a14773d581563cfa00d98e351961c004caad19fc7d6783b46fe416c5694",
+ "sdf_sha256": "26333535aad8bce2d90c9d0c80d6a1f58347429272bcdc203605732ce05b5012",
+ "mass_measured_kg": 0.2975,
+ "mass_source": "user 2026-11-02: real vehicle with battery 297.5 g",
+ "mass_sum_before": 0.293,
+ "mass_sum_after": 0.2975,
+ "base_link_mass": 0.2895,
+ "imu_pose_flu": "0.0043 -0.0073 0.016 0 0 0",
+ "motor_constant": [
+  "1.78e-06"
+ ],
+ "motor_constant_check": "real ulog hover 0.356/0.357 at 0.2975 kg -> 1.7837e-6/1.7796e-6 (THR_MDL_FAC 0.9, omega=150+850u)",
+ "expected_sitl_hover_thrust": 0.3552,
+ "not_changed": [
+  "inertia (box estimate)",
+  "motor constants",
+  "sensors other than the IMU pose",
+  "airframe 4202"
+ ],
+ "use": "WK_MODEL_DIR=/home/dronesim/starling_sim/v3_marker/gz/variants/m3 (run_wk_instance.sh / wk_fly.sh)"
+}
