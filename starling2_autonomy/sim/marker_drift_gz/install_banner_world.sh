@@ -15,6 +15,9 @@ for p in "$OUT/models/$NAME/model.sdf" "$OUT/models/$NAME/model.config" "$OUT/wo
   [ -e "$p" ] || { echo "!! 없음: $p"; exit 1; }
 done
 if command -v gz >/dev/null 2>&1; then
+  # model:// URI 해석을 위해 검사 중에만 모델 경로를 준다 (현수막 = $OUT/models, qvix 등 = PX4 트리)
+  export GZ_SIM_RESOURCE_PATH="$OUT/models:$GZ/models${GZ_SIM_RESOURCE_PATH:+:$GZ_SIM_RESOURCE_PATH}"
+  export SDF_PATH="$GZ_SIM_RESOURCE_PATH${SDF_PATH:+:$SDF_PATH}"
   gz sdf -k "$OUT/models/$NAME/model.sdf" >/dev/null && echo "sdf ok: model" || { echo "!! model.sdf 검사 실패"; exit 1; }
   gz sdf -k "$OUT/worlds/$NAME.sdf" >/dev/null && echo "sdf ok: world" || { echo "!! $NAME.sdf 검사 실패"; exit 1; }
 fi

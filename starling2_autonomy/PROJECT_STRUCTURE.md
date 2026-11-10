@@ -164,6 +164,8 @@ Drone_project/starling2_autonomy/
 │   ├── 08_voa_pc_parser.md            voa_pc_out 파서
 │   ├── 09_marker_drift_experiment_plan.md  마커 드리프트 실험계획서 (+ _brief.md 랩미팅 요약)
 │   ├── 10_drone_survey_marker_drift.md     기체 실측 조사 2026-09-23
+│   ├── 11_voxl_readonly_collection.md      VOXL 읽기 전용 수집 지시서 2026-11-03
+│   ├── 12_marker_drift_experiment_log.md   마커 드리프트 실험 진행 기록 단일 문서 (타임라인·패치노트·트러블슈팅) 2026-11-09~
 │   └── guide/                         Starling 2 메인 가이드·기술 문서 (md + 작성본 docx/pdf)
 ├── flight/                ← 비행 코드 원본 (기체에 배포되는 실체)
 │   ├── path_flight_phase1_v14.py      현행 메인 코드
@@ -178,7 +180,8 @@ Drone_project/starling2_autonomy/
 ├── sim/                   ← 시뮬레이션 (연구실 서버 drone_sim_gz 와 연동)
 │   ├── handoff_2026-10-27/            SITL 재현용 인계 자료 (PX4 파라미터 덤프·물리값·ulog)
 │   └── marker_drift_gz/               드리프트 실험 SITL 선검증: 현수막 월드 생성기, 시뮬 태그 검출기(UDP), 월드 설치,
-│                                      run_sim_drift.sh(인스턴스 기동→mavsdk_server→비행 --sim), 서버 동기화. drone_sim_gz 파일 불변
+│                                      run_sim_drift.sh(인스턴스 기동→mavsdk_server→비행 --sim, INJECT 오차 주입), summarize_run.py(결과 요약),
+│                                      서버 동기화. drone_sim_gz 파일 불변. 2026-11-10 서버 검증 8회 통과 → docs/12
 ├── tools/                 ← 기체 동기화
 │   ├── deploy.sh                      로컬 → 기체 단일 파일 (백업·md5·문법검증 포함)
 │   ├── deploy_pkg.sh                  s2flight 패키지 + 진입 스크립트 폴더 배포 (tar, 파일별 md5, compileall)

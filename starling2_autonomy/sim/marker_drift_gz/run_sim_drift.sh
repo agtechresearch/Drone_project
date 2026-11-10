@@ -10,6 +10,8 @@
 # env: INSTANCE(2) WORLD(drift_banner) SIM(~/starling_sim) MD($SIM/marker_drift) FLIGHT_WS(/home/dronesim/workspace)
 #      CAM_TOPIC(/front_camera_real) TAG_HZ(5) TAG_SIZE(0.20) SPAWN(0,0,0.035,0,0,1.5708) RTF(1) MISSION_TIMEOUT(600 s)
 #      KEEP_SITL(0 = 끝나면 인스턴스 정지) NO_TAGS(0)
+#      INJECT('{}') vio_relay.py 오차 주입 JSON: rot_deg(VIO 프레임 회전 °), drift_n/drift_e(m/s), step_e/step_at(m, 이륙 후 s),
+#                   noise_pos_m/noise_vel_m_s. 산출물 inject.json 에 남는다.
 set -u
 N=${INSTANCE:-2}; case "$N" in 2|3|4|5) ;; *) echo "!! INSTANCE=$N 은 허용되지 않음 (2..5; 0/1 은 다른 작업대)"; exit 2;; esac
 SIM=${SIM:-$HOME/starling_sim}; V3=$SIM/v3_marker; SC=$V3/scripts; MD=${MD:-$SIM/marker_drift}
@@ -35,7 +37,9 @@ echo "$*" > "$OUT/args.txt"; echo "instance=$N world=$WORLD spawn=$SPAWN cam=${C
 step "인스턴스 $N 정지"
 "$SC/stop_sitl_instance.sh" $N || { echo "!! 인스턴스 $N 정리 실패 (rc $?) — 재기동하지 않음. $V3/logs/stop_sitl_$N.log 확인"; exit 2; }
 step "인스턴스 $N 기동: world=$WORLD spawn=$SPAWN (북향 스폰 — drone_sim_gz 규칙)"
-docker exec starling-gz bash -c "echo '{}' > /tmp/wk_inject_$N.json"        # VIO 오차 주입 없음
+INJECT=${INJECT:-"{}"}   # vio_relay.py 오차 주입 JSON (기본 {} = 없음). 예: INJECT='{"drift_n":-0.02}' / '{"rot_deg":3}' / '{"step_e":0.3,"step_at":25}'
+docker exec -i starling-gz bash -c "cat > /tmp/wk_inject_$N.json" <<<"$INJECT"
+echo "inject=$INJECT" >> "$OUT/args.txt"; echo "$INJECT" > "$OUT/inject.json"
 for boot in 1 2 3; do
   setsid docker exec starling-gz bash -c "$SC/run_wk_instance.sh $N $WORLD headless $SPAWN ${RTF:-1}" > "$OUT/sitl.log" 2>&1 < /dev/null &
   for i in $(seq 1 150); do grep -a -q "New NED origin" "$OUT/sitl.log" && break; grep -a -q "EXIT=" "$OUT/sitl.log" && break; sleep 1; done

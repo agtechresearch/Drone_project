@@ -2,8 +2,12 @@
 
 실기 비행 전에 `flight/marker_drift_flight.py` + `flight/s2flight/` 를 연구실 서버의 시뮬레이션에서 먼저 돌린다
 (2026-11-09 결정: 프롭 탈착이 필요한 지상 arm 시험은 하지 않고, 시뮬 → 실기 짧은 호버 시험 → 본실험 순).
-시뮬 기반은 깃허브 `gz-harmonic-sim` 브랜치의 `drone_sim_gz/` (PX4 v1.15.4 SITL + gz Harmonic, 컨테이너 `starling-gz` /
-`starling-flight`). **그쪽 파일은 수정하지 않는다** — 인스턴스 2~5 도구를 호출만 한다.
+시뮬 기반은 리포의 `drone_sim_gz/` (PX4 v1.15.4 SITL + gz Harmonic, 컨테이너 `starling-gz` / `starling-flight`; 2026-11-10 main 에 병합됨).
+**그쪽 파일은 수정하지 않는다** — 인스턴스 2~5 도구를 호출만 한다.
+
+**검증 상태 (2026-11-10, 연구실 서버 agtechlab 인스턴스 2):** 1차 `--no-align --stop-mode distance --distance 0.5` completed,
+2차 `--condition A --run 1` ALIGNED → center ok → out STOPPED(태그 10) → back STOPPED(태그 0) → 착륙. `legs_settled` drift_along −0.004 m.
+서버 접속·결과는 `worklog/2026-11-10.md`.
 
 ## 무엇이 어떻게 대체되는가
 
@@ -62,6 +66,22 @@ sim/run_sim_drift.sh --altitude 2.0 --condition C --run 1 --start-tag 20 --end-t
 
 환경변수: `INSTANCE`(2~5) `WORLD` `CAM_TOPIC`(/front_camera_real; /front_camera 는 640×480 68°) `TAG_HZ`(5) `TAG_SIZE`(0.20)
 `SPAWN` `RTF` `MISSION_TIMEOUT`(600) `KEEP_SITL=1`(끝나도 인스턴스 유지) `NO_TAGS=1`(검출기 없이, `--no-align` 자동).
+
+## 오류 주입 (`INJECT`, vio_relay.py)
+
+`run_wk_instance.sh` 의 VIO relay 가 `/tmp/wk_inject_N.json` 을 0.5 s 마다 읽어 PX4 로 가는 VIO 에 오차를 넣는다. `INJECT='<json>'` 로 넘기면
+그 파일에 써 주고 산출물 `inject.json` 에 남긴다. 키: `rot_deg`(VIO 프레임 회전 °), `drift_n`/`drift_e`(m/s, 이륙 후 등속), `step_e`/`step_at`
+(m, 이륙 후 s 에 점프), `noise_pos_m`/`noise_vel_m_s`(백색잡음), `noise_seed`.
+
+```bash
+INJECT='{"drift_n":-0.02}'            sim/run_sim_drift.sh --condition D --run 1   # 이동축 −2 cm/s 드리프트 → settled drift_along ≈ −0.02·t
+INJECT='{"step_e":-0.3,"step_at":25}' sim/run_sim_drift.sh --condition S --run 1   # 25 s 에 VIO 0.3 m 점프 → 실제 이격 0.7→1.0, drift_standoff −0.30
+INJECT='{"noise_pos_m":0.02,"noise_vel_m_s":0.05}' sim/run_sim_drift.sh --condition N --run 1
+sim/run_sim_drift.sh --condition M --run 1 --end-tag 11 --max-extra 0.5          # 끝 태그 없음 → MAX_DIST → 그 자리 착륙
+python3 sim/summarize_run.py logs/<시각>_iN                                        # 폴더 요약 (정지 사유·settled·err 통계·gt 범위)
+```
+2026-11-10 결과(6 시나리오 모두 설계대로; 횡방향 점프 0.8 m 는 지오펜스 2.5 m 안이라 통과하므로 실기 통로에선 `--max-horizontal-dev` 를 조일 것):
+`worklog/2026-11-10.md` 표.
 
 ## 월드 기하 (`make_banner_world.py`)
 
