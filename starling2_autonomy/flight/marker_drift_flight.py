@@ -19,7 +19,7 @@
 
 기체에서:
     python3 marker_drift_flight.py --altitude 0.6 --condition A --run 1
-    python3 marker_drift_flight.py --altitude 2.0 --condition C --run 1      # 상단열도 ID 0~10 (2026-11-10), 높이로만 구분
+    python3 marker_drift_flight.py --altitude 2.0 --condition C --run 1      # 상단열도 ID 0~9 (2026-11-10), 높이로만 구분
     python3 marker_drift_flight.py --no-align --distance 0.5 --condition T    # 패키지 호버 점검 비행 (시뮬 통과 후)
 
 시뮬레이션(drone_sim_gz, gz Harmonic SITL — 실기 전에 여기서 먼저 돌린다; sim/marker_drift_gz/README.md):
@@ -70,7 +70,7 @@ class DriftParams(object):
     def __init__(self, altitude=0.6, distance=5.0, speed=0.5, turn_deg=-90.0, turn_speed=20.0,
                  post_turn_hover=2.0, hover_ref=10.0, hover_far=5.0, hover_return=5.0,
                  do_align=True, align=None, condition="A", run=1, standoff=0.70,
-                 stop_mode="tag", start_tag=0, end_tag=10, tag_spacing=0.5, center=True, center_tol=0.05,
+                 stop_mode="tag", start_tag=0, end_tag=9, tag_spacing=0.5, center=True, center_tol=0.05,
                  center_standoff=True, max_extra=1.0, tag_stale=0.4):
         self.altitude = altitude
         self.distance = distance              # stop_mode=distance 에서만 비행에 쓰인다
@@ -286,7 +286,7 @@ def build_arg_parser():
     t.add_argument("--stop-mode", choices=["tag", "distance"], default="tag",
                    help="tag: 끝 태그가 카메라 중앙에 오면 정지(기본, 도달 판정 없음) / distance: 자기 추정으로 --distance 만큼(옛 방식)")
     t.add_argument("--start-tag", type=int, default=0, help="시작 태그 id (정렬·센터링·복귀 정지). 상단열도 0 (2026-11-10)")
-    t.add_argument("--end-tag", type=int, default=10, help="끝 태그 id (우측 이동 정지). 상단열도 10")
+    t.add_argument("--end-tag", type=int, default=9, help="끝 태그 id (우측 이동 정지). 2026-11-10 실험장: 현수막이 짧아 태그 0~9 (비행 4.5 m), 상단열도 9")
     t.add_argument("--tag-spacing", type=float, default=0.5, help="태그 간격 m → 실제 위치 환산")
     t.add_argument("--center-tol", type=float, default=0.05, help="'중앙' 판정 허용 m (센터링·정지 공통)")
     t.add_argument("--no-center", action="store_true", help="정렬 뒤 start 태그 센터링 생략")

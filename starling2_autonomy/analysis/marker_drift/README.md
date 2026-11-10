@@ -47,7 +47,7 @@ python -m marker_drift coverage --standoff 0.5 --altitude 0.6 --tag-size 0.10 # 
 python -m marker_drift coverage --intrinsics hires.yaml --layout my.yaml --standoff 0.5 --altitude 2.0 -v
 ```
 
-기본 배치(**2026-11-09: 20 cm 태그, 0.5 m 간격, ID 0~10, 이격 70 cm**, 120° 화각) 결과: 경로 100 %에서 태그 2개 이상,
+기본 배치(**2026-11-09: 20 cm 태그, 0.5 m 간격, ID 0~10, 이격 70 cm**, 120° 화각; 실제 실험장은 2026-11-10 부터 태그 0~9·4.5 m, `layouts/lab_*.yaml`) 결과: 경로 100 %에서 태그 2개 이상,
 한 변 106 px(1280 px) / 84 px(1024 px). 당초 배치(7 cm, 이격 50 cm) 결과: 경로 100 %에서 태그 2개 이상, 93 %에서 3개 이상,
 한 변 52 px(벽이 화상면과 평행해 위치와 무관). 1 m 간격이면 2개 이상은 71 %로 떨어진다.
 

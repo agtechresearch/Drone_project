@@ -36,7 +36,7 @@ from .util import angle_diff_deg, body_delta_to_ned, log, yaw_to_360
 class BannerLayout(object):
     """태그 id → 현수막 along 좌표 (m). start..end 만 유효."""
 
-    def __init__(self, start_tag=0, end_tag=10, spacing_m=0.5):
+    def __init__(self, start_tag=0, end_tag=9, spacing_m=0.5):      # 2026-11-10 실험장: 태그 0~9 (4.5 m)
         if end_tag <= start_tag:
             raise ValueError("end_tag 는 start_tag 보다 커야 한다")
         self.start_tag = int(start_tag)

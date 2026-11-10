@@ -15,7 +15,7 @@
 | `voxl-inspect-pose -n px4_vehicle_local_position` (도달 판정) | MAVSDK 텔레메트리 (`position_velocity_ned` + `attitude_euler`) | `s2flight.sim.sim_pose_task`, `--sim` |
 | `/run/mpa/tag_detections` (voxl-tag-detector) | `sim_tag_detect.py`: `front_camera_real`(1280×800, 실기 tracking_front 화각) → pupil_apriltags → UDP JSON | `s2flight.sim.UdpTagFeed`, `--sim-tag-port` |
 | voxl-logger | 없음 (진실값은 gz `gt_logger.py` 의 `gt.csv`) | `--sim` 이면 생략 |
-| 현수막 + 태그 0~10 (20 cm, 0.5 m 간격, 이격 70 cm) | `drift_banner` 모델·월드 | `make_banner_world.py` |
+| 현수막 + 태그 0~9 (20 cm, 0.5 m 간격, 이격 70 cm; 2026-11-10 실험장) | `drift_banner` 모델·월드 | `make_banner_world.py` |
 | RC OFFBOARD 스위치 | 불필요 | — |
 
 비행 로직(`vehicle`, `align_stage`, 지오펜스, 기록)은 실기와 **같은 코드**가 돈다. 다른 것은 입력 어댑터뿐이다 (v13 의 `--sim` 과 같은 접근).
@@ -45,13 +45,13 @@ SIM_HOST=user@server ./sim/marker_drift_gz/sync_to_server.sh
 
 # 서버 호스트
 cd ~/starling_sim/marker_drift
-python3 sim/make_banner_world.py --upper         # 태그 0~10 @ z 0.60 + 상단열(같은 ID 0~10) @ 2.0 (2026-11-10 실험장). --upper-ids 로 변경 가능
+python3 sim/make_banner_world.py --upper         # 태그 0~9 @ z 0.60 + 상단열(같은 ID 0~9) @ 2.0 (2026-11-10 실험장). --ids/--upper-ids 로 변경 가능
 docker exec starling-gz ~/starling_sim/marker_drift/sim/install_banner_world.sh   # PX4 gz 트리에 모델·월드 복사 (빌드 없음)
 
 # 1) 패키지 점검 비행: 이륙 → 좌회전 → 0.5 m 왕복 → 착륙 (태그 정렬 없음)
 sim/run_sim_drift.sh --no-align --distance 0.5 --hover-ref 3 --hover-far 2 --hover-return 2 --condition T
 
-# 2) 정렬 포함 본 시퀀스 (A 조건, 0.6 m, 5.0 m 왕복)
+# 2) 정렬 포함 본 시퀀스 (A 조건, 0.6 m, 4.5 m 왕복)
 sim/run_sim_drift.sh --condition A --run 1
 # 3) 조건 C (상단열 월드: make_banner_world.py --upper 후 재설치). 상단열도 ID 0~10 이라 --start/end-tag 는 그대로
 sim/run_sim_drift.sh --altitude 2.0 --condition C --run 1
@@ -96,14 +96,14 @@ docker exec -d -e DISPLAY=:1 -e QT_X11_NO_MITSHM=1 -e GZ_PARTITION=starling_2 st
 ## 월드 기하 (`make_banner_world.py`)
 
 - 기체 스폰 (0, 0) 북향(gz yaw 1.5708; drone_sim_gz 규칙 — 다른 방향 스폰은 착지 시 yaw 점프를 만든다).
-- 현수막 평면 x = −0.70 (기체 왼쪽), 법선 +x. 태그 k 는 y = 0.5·k (0 → 0 m, 10 → 5.0 m), 중심 z 0.60. 검은 사각형 0.20 m, 인쇄 0.25 m.
-- 흰 판 5.5 × 0.5 m 가 태그 뒤 4 mm 에 있다 (`--banner-h`, `--banner-margin`). `--upper` 면 **같은 ID 0~10** 이 z 2.00 에 같은 배치
+- 현수막 평면 x = −0.70 (기체 왼쪽), 법선 +x. 태그 k 는 y = 0.5·k (0 → 0 m, 9 → 4.5 m), 중심 z 0.65 (실측 2026-11-10; 비행 고도 0.6). 검은 사각형 0.20 m, 인쇄 0.25 m.
+- 흰 판 5.0 × 0.5 m 가 태그 뒤 4 mm 에 있다 (`--banner-h`, `--banner-margin`). `--upper` 면 **같은 ID 0~9** 가 z 2.00 에 같은 배치
   (2026-11-10 실험장 변경; 링크 이름 `tag_NN_r1`, layout 키 `NN_r1`). 비행 코드는 |y_cam| > 0.7 m 검출을 버려 다른 열을 섞지 않는다.
-- 비행: 이륙 → 좌회전 90° (−x 를 봄 = 현수막 정면) → 정렬 → body 우측 = +y 로 5.0 m → 복귀. `banner_layout.json` 에 좌표가 남는다.
+- 비행: 이륙 → 좌회전 90° (−x 를 봄 = 현수막 정면) → 정렬 → body 우측 = +y 로 4.5 m → 복귀. `banner_layout.json` 에 좌표가 남는다.
 
 ## 판정
 
-- `mission.log` / `_summary.json`: `sequence.completed`, `align.state == ALIGNED`, `legs[*].status == STOPPED`(태그 10 / 태그 0 중앙에서 정지),
+- `mission.log` / `_summary.json`: `sequence.completed`, `align.state == ALIGNED`, `legs[*].status == STOPPED`(태그 9 / 태그 0 중앙에서 정지),
   `legs_settled[*].drift_along`(자기 추정 − 태그 실제; 시뮬 VIO 는 진실값 relay 라 0 근처가 정상), `center.ok`.
 - `md_*_drift_log.csv`: 태그 프레임마다 `truth_along / own_along_b / err_along`. 시뮬에서는 err ≈ 0 이어야 코드가 맞는 것이다.
 - `tags.csv`: 정렬 구간에 `n_det ≥ 2`. `tag_detect.log` 첫 줄에 `image 1280x800 fx=276.x`.

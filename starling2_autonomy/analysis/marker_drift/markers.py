@@ -22,7 +22,8 @@ LAYOUT_DIR = os.path.join(os.path.dirname(__file__), "layouts")
 
 
 def default_lab_layout(spacing_m=0.5, length_m=5.0, low_z=0.60, high_z=2.00, size_m=0.20):
-    """docs/09 §4.1 기본 배치. 2026-09-23 확정 0.5 m 간격 → 2026-11-09 변경: 길이 5.0 m(하단열 ID 0~10, 상단열 20~30), 크기 20 cm."""
+    """docs/09 §4.1 기본 배치(합성·커버리지 계산용). 2026-09-23 확정 0.5 m 간격 → 2026-11-09: 길이 5.0 m(하단열 ID 0~10, 상단열 20~30), 20 cm.
+    실제 실험장(2026-11-10)은 태그 0~9(4.5 m), 두 열 같은 ID 라 layouts/lab_default.yaml(하단)·lab_upper.yaml(상단) 을 쓴다."""
     n = int(math.floor(length_m / spacing_m + 1e-9))
     xs = [round(i * spacing_m, 3) for i in range(n + 1)]
     if xs[-1] < round(length_m, 3) - 1e-9:

@@ -8,7 +8,7 @@
     python3 sim/pilot_stats.py --csv pilot.csv logs/...         # 비행별 표를 CSV 로도 저장
 
 지표(--metric):
-    out    = legs_settled[out_settled].drift_along   (태그 10 앞 최종 드리프트 E, 기본)
+    out    = legs_settled[out_settled].drift_along   (끝 태그(9) 앞 최종 드리프트 E, 기본)
     back   = legs_settled[back_settled].drift_along  (복귀 후 루프 폐합 드리프트)
     loop   = out − back                               (왕복 누적)
     standoff = out_settled.drift_standoff

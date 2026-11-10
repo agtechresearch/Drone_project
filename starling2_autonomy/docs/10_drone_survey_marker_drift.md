@@ -88,7 +88,7 @@ OpenCV FileStorage 형식 → `marker_drift.intrinsics.Intrinsics.load()` 가 �
 - 출력 파이프 `tag_detections`, 구조체 `tag_detection_t` **252 바이트 packed**:
   `uint32 magic, int32 id, float size_m, int64 timestamp_ns, char name[64], int loc_type, float T_tag_wrt_cam[3], float R_tag_to_cam[3][3], float T_tag_wrt_fixed[3], float R_tag_to_fixed[3][3], char cam[64], int reserved`
   → 파이썬 `struct` `"<IifqQ..."` 대신 `"<I i f q 64s i 3f 9f 3f 9f 64s i"` 로 언팩 (총 252 B 확인 필요). `mpa_point_cloud.py` 의 순수 파이썬 구독 패턴 재사용.
-- **실험용 변경 필요(다음 접속, 승인 후)**: `tag_locations.conf` 에 id 0~11, 20~31 을 size 0.07 로 등록(`default_size_m 0.07`), `skip_n_frames` 를 5 → 0~1 로 낮춰 30 fps 중 15~30 fps 검출, detector_1(tracking_down) 은 끄기. 서비스는 실험 중에만 `systemctl start` 하고 enable 은 하지 않는다.
+- **실험용 변경 필요(다음 접속, 승인 후)**: `tag_locations.conf` 에 id 0~9 를 size **0.20** 로 등록(`default_size_m 0.20`; 2026-11-10 실험장: 두 열 같은 ID 0~9, 당초 0~11·20~31·0.07), `skip_n_frames` 를 5 → 0~1 로 낮춰 30 fps 중 15~30 fps 검출, detector_1(tracking_down) 은 끄기. 서비스는 실험 중에만 `systemctl start` 하고 enable 은 하지 않는다.
 - 크기가 0.4 m 로 잡혀 있으면 T_tag_wrt_cam 거리가 5.7배로 나온다. 크기 설정이 정렬 yaw 에는 영향이 없지만(회전은 크기와 무관) 위치에는 직접 영향.
 
 ## 5. vision-hub / VIO 상태

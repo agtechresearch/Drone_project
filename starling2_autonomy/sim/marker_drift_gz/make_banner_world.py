@@ -2,7 +2,7 @@
 """드리프트 실험 현수막 월드 생성기 (gz Harmonic, drone_sim_gz 용). 호스트(cad venv, PIL)에서 실행.
 
     python3 make_banner_world.py [--out ~/starling_sim/marker_drift/gz] [--size 0.20] [--standoff 0.70]
-                                 [--ids 0-10] [--spacing 0.5] [--z 0.60] [--upper] [--base-world ...] [--tags-dir ...]
+                                 [--ids 0-9] [--spacing 0.5] [--z 0.60] [--upper] [--base-world ...] [--tags-dir ...]
 
 만드는 것 (모두 --out 아래)
     models/drift_banner/model.sdf, model.config, materials/textures/tag_NN.png
@@ -16,7 +16,7 @@
 좌표 약속 (docs/09 §5.2 와 같은 배치를 gz 월드에 옮김)
     기체 스폰 (0, 0, 0.035) 북향(yaw 1.5708 — drone_sim_gz 규칙: 항상 N 을 보고 스폰). 현수막은 기체 왼쪽 = -x 에 있다.
     비행: 이륙 → 좌회전 90° (서향, 현수막 정면) → 정렬 → "우측" 이동 = +y 로 --distance m. 태그 k 는 y = k * spacing 에 있어
-    태그 0 이 시작점 정면, 태그 10 이 5.0 m 지점 정면이다.
+    태그 0 이 시작점 정면, 태그 9 가 4.5 m 지점 정면이다 (2026-11-10 실험장: 현수막이 짧아 0~9).
 
 설치: 생성 뒤 starling-gz 안에서 install_banner_world.sh (PX4 Tools/simulation/gz/{models,worlds} 로 복사).
 """
@@ -186,11 +186,11 @@ def main():
     p.add_argument("--textures-dir", default=DEF_TEX_DIR, help="PIL 이 없을 때 복사할 확대본 tag_NN.png 폴더")
     p.add_argument("--size", type=float, default=0.20, help="태그 검은 사각형 한 변 m (2026-11-09 확정 0.20)")
     p.add_argument("--standoff", type=float, default=0.70, help="현수막 평면과 스폰점 거리 m (확정 0.70)")
-    p.add_argument("--ids", default="0-10", help="하단열 태그 id (예: 0-10 또는 0,1,2)")
+    p.add_argument("--ids", default="0-9", help="하단열 태그 id (예: 0-9 또는 0,1,2). 2026-11-10 실험장 0~9")
     p.add_argument("--spacing", type=float, default=0.5, help="태그 간격 m")
-    p.add_argument("--z", type=float, default=0.60, help="하단열 태그 중심 높이 m (조건 A/B 고도)")
+    p.add_argument("--z", type=float, default=0.65, help="하단열 태그 중심 높이 m. 2026-11-10 실측 0.65 (상단 0.75 / 하단 0.55); 비행 고도는 0.6")
     p.add_argument("--upper", action="store_true", help="상단열(조건 C)도 만든다")
-    p.add_argument("--upper-ids", default="0-10", help="상단열 ID. 2026-11-10 실험장: 하단열과 같은 0~10 (높이로만 구분)")
+    p.add_argument("--upper-ids", default="0-9", help="상단열 ID. 2026-11-10 실험장: 하단열과 같은 0~9 (높이로만 구분)")
     p.add_argument("--upper-z", type=float, default=2.00)
     p.add_argument("--banner-h", type=float, default=0.50, help="현수막 높이 m (실물 50 cm)")
     p.add_argument("--banner-margin", type=float, default=0.25, help="양 끝 태그 바깥 여유 m")

@@ -1,7 +1,7 @@
 #!/bin/bash
 # 마커 드리프트 실험 비행을 SITL 에서 1회 돌린다 (연구실 서버 호스트에서 실행).
 #   run_sim_drift.sh [marker_drift_flight.py 인자...]
-#   예) run_sim_drift.sh --condition A --run 1                       # 정렬 포함 본 시퀀스 (5.0 m)
+#   예) run_sim_drift.sh --condition A --run 1                       # 정렬 포함 본 시퀀스 (태그 0~9, 4.5 m)
 #       run_sim_drift.sh --no-align --distance 0.5 --condition T     # 패키지 점검 비행 (지상 arm 시험 대신)
 #       NO_TAGS=1 run_sim_drift.sh --distance 1.0                    # 태그 검출기 없이 (--no-align 자동)
 # drone_sim_gz(v3_marker) 의 인스턴스 2~5 도구(stop_sitl_instance.sh, run_wk_instance.sh, gt_logger.py)를 그대로 호출하고,
