@@ -107,8 +107,8 @@ OpenCV FileStorage 형식 → `marker_drift.intrinsics.Intrinsics.load()` 가 �
 
 ## 7. 다음 접속에서 할 일
 
-1. **손 검출 시험** — 7 cm 태그 인쇄, `tag_locations.conf` 크기 0.07 로 임시 변경 후 `voxl-tag-detector` 전경 실행,
-   `voxl-inspect-tags` 로 50 cm / 1 m 에서 검출·거리 확인. tracking_front 에서 x=0 위치 태그 0·1 동시 가시 확인.
+1. **손 검출 시험** — 20 cm 태그 인쇄(2026-11-09 변경, 당초 7 cm), `tag_locations.conf` 크기 **0.20** 으로 임시 변경 후 `voxl-tag-detector` 전경 실행,
+   `voxl-inspect-tags` 로 70 cm / 1 m 에서 검출·거리 확인. tracking_front 에서 x=0 위치 태그 0·1 동시 가시 확인.
 2. **hires 캘리브레이션** — 체커보드를 `voxl-logger -c hires_large_color -t 20` 으로 찍어 `marker_drift calibrate`.
    small 과 large 는 같은 센서의 다른 크롭/스케일이므로 large 로 캘리브레이션하고 small 은 스케일링 검증.
 3. **hires_large_color 기록 부하 시험** — `-t 10` 기록 중 `voxl-inspect-cpu`, 드롭 여부(`info.json dropped_data`).

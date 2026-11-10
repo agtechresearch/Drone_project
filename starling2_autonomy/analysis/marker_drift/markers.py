@@ -21,8 +21,8 @@ from marker_drift import geometry
 LAYOUT_DIR = os.path.join(os.path.dirname(__file__), "layouts")
 
 
-def default_lab_layout(spacing_m=0.5, length_m=5.5, low_z=0.60, high_z=2.00, size_m=0.07):
-    """docs/09 §4.1 기본 배치(2026-09-23 확정): 0.5 m 간격, 하단열 ID 0~11 (60 cm), 상단열 ID 20~31 (200 cm)."""
+def default_lab_layout(spacing_m=0.5, length_m=5.0, low_z=0.60, high_z=2.00, size_m=0.20):
+    """docs/09 §4.1 기본 배치. 2026-09-23 확정 0.5 m 간격 → 2026-11-09 변경: 길이 5.0 m(하단열 ID 0~10, 상단열 20~30), 크기 20 cm."""
     n = int(math.floor(length_m / spacing_m + 1e-9))
     xs = [round(i * spacing_m, 3) for i in range(n + 1)]
     if xs[-1] < round(length_m, 3) - 1e-9:
@@ -46,7 +46,7 @@ class Layout:
     def __init__(self, data):
         self.name = data.get("name", "layout")
         self.tag_family = data.get("tag_family", "tag36h11")
-        self.default_size_m = float(data.get("default_size_m", 0.07))
+        self.default_size_m = float(data.get("default_size_m", 0.20))
         self.markers = {}
         for m in data.get("markers", []):
             m = dict(m)

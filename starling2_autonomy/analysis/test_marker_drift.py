@@ -149,7 +149,7 @@ def test_pnp_roundtrip():
     cases = [
         ((0.30, -0.50, 0.60), (4.0, 1.5, -1.0), 0),
         ((2.70, -0.55, 0.62), (-3.0, -2.0, 0.5), 3),
-        ((5.40, -0.48, 2.02), (1.0, 0.0, 0.0), 31),
+        ((4.90, -0.68, 2.02), (1.0, 0.0, 0.0), 30),
         ((1.00, -1.20, 0.60), (0.0, 0.0, 0.0), 1),
     ]
     for pos, att, tid in cases:
@@ -399,12 +399,12 @@ def test_voxl_logger_loaders():
 
 def test_layout_and_stats():
     lay = Layout(default_lab_layout())
-    check("기본 배치 24개 마커 (0.5 m 간격)", len(lay) == 24)
-    check("하단열 ID 0~11, 상단열 20~31", lay.ids() == list(range(12)) + list(range(20, 32)))
-    check("마커 11 은 x=5.5, z=0.6", lay.markers[11]["x"] == 5.5 and lay.markers[11]["z"] == 0.6)
-    check("마커 31 은 x=5.5, z=2.0", lay.markers[31]["x"] == 5.5 and lay.markers[31]["z"] == 2.0)
+    check("기본 배치 22개 마커 (0.5 m 간격, 5.0 m)", len(lay) == 22)
+    check("하단열 ID 0~10, 상단열 20~30 (2026-11-09: 5.0 m)", lay.ids() == list(range(11)) + list(range(20, 31)))
+    check("마커 10 은 x=5.0, z=0.6", lay.markers[10]["x"] == 5.0 and lay.markers[10]["z"] == 0.6)
+    check("마커 30 은 x=5.0, z=2.0", lay.markers[30]["x"] == 5.0 and lay.markers[30]["z"] == 2.0)
     lay1 = Layout(default_lab_layout(spacing_m=1.0))
-    check("1 m 간격이면 7개/열, 상단열 10~16", lay1.ids() == [0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16])
+    check("1 m 간격이면 6개/열, 상단열 10~15", lay1.ids() == [0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15])
     yml = os.path.join(HERE, "marker_drift", "layouts", "lab_default.yaml")
     lay2 = Layout.load(yml)
     check("layouts/lab_default.yaml 과 기본 배치 일치",

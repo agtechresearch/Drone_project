@@ -47,7 +47,8 @@ python -m marker_drift coverage --standoff 0.5 --altitude 0.6 --tag-size 0.10 # 
 python -m marker_drift coverage --intrinsics hires.yaml --layout my.yaml --standoff 0.5 --altitude 2.0 -v
 ```
 
-기본 배치(7 cm, 0.5 m 간격, 이격 50 cm, 120° 화각, 1280×800) 결과: 경로 100 %에서 태그 2개 이상, 93 %에서 3개 이상,
+기본 배치(**2026-11-09: 20 cm 태그, 0.5 m 간격, ID 0~10, 이격 70 cm**, 120° 화각) 결과: 경로 100 %에서 태그 2개 이상,
+한 변 106 px(1280 px) / 84 px(1024 px). 당초 배치(7 cm, 이격 50 cm) 결과: 경로 100 %에서 태그 2개 이상, 93 %에서 3개 이상,
 한 변 52 px(벽이 화상면과 평행해 위치와 무관). 1 m 간격이면 2개 이상은 71 %로 떨어진다.
 
 **태그 2개 이상이 보이는 프레임은 한 몸 PnP**(`geometry.solve_multi_tag_camera_pose`, `joint_*` 컬럼)로 푼다.
@@ -136,5 +137,5 @@ PnP 는 `cv2.SOLVEPNP_IPPE_SQUARE` (코너 순서 좌하·우하·우상·좌상
 1. 태그 2~3개를 실측 간격으로 벽에 붙이고 `layout.yaml` 에 좌표를 적는다.
 2. 카메라(핸드폰이든 기체 hires 든)를 캘리브레이션한다(②).
 3. 정지 30 s 촬영 → ③ → ④ 로 잡음과 허용오차를 본다.
-4. 벽과 50 cm 를 유지하며 천천히 옆으로 걸어가며 촬영 → ③ → `per_frame_pose` 의 `spread_m` (태그 2개가 동시에
+4. 벽과 70 cm 를 유지하며 천천히 옆으로 걸어가며 촬영 → ③ → `per_frame_pose` 의 `spread_m` (태그 2개가 동시에
    보일 때 두 태그에서 구한 위치의 불일치) 로 마커 좌표 실측 오차를 검증한다. 수 mm 이내면 정상.
