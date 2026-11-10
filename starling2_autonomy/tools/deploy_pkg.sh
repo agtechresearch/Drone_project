@@ -96,7 +96,8 @@ ok "전송 완료"
 
 info 5/6 "md5 대조 및 기체 문법 검증"
 LOCAL_SUMS="$(for f in "${FILES[@]}"; do
-  rel="${f#flight/}"; printf '%s  %s\n' "$(md5sum "$f" | cut -d' ' -f1)" "$rel"; done | sort -k2)"
+  rel="${f#flight/}"; [[ "$f" == "$ENTRY" ]] && rel="$ENTRY_NAME"   # 진입 스크립트는 기체에 basename 으로 놓인다 (tools_onboard/ 하위 폴더 대응)
+  printf '%s  %s\n' "$(md5sum "$f" | cut -d' ' -f1)" "$rel"; done | sort -k2)"
 REMOTE_SUMS="$(ssh "$DRONE_HOST" "cd '$DRONE_DIR' && (find s2flight -name '*.py' | sort; echo '$ENTRY_NAME') | xargs md5sum" | awk '{print $1"  "$2}' | sort -k2)"
 if [[ "$LOCAL_SUMS" != "$REMOTE_SUMS" ]]; then
   echo "--- 로컬"; echo "$LOCAL_SUMS"; echo "--- 기체"; echo "$REMOTE_SUMS"

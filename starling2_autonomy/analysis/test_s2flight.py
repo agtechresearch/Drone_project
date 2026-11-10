@@ -17,6 +17,7 @@ import shutil
 import socket
 import sys
 import tempfile
+import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "flight"))
@@ -83,6 +84,13 @@ class FakeDrone(object):
         self.vehicle = None
         self.cmd_log = []
         self.ts_ms = 0.0
+        # VIO 상태 (2026-11-10 사고 대책 테스트): 기본 양호. 테스트가 바꾼다
+        self.vio_quality = 96
+        self.vio_features = 11
+        self.vio_state = "OKAY"
+        self.vio_feed = True
+        self.extra_pipe_offset = (0.0, 0.0, 0.0)      # 파이프에만 더해지는 오프셋 → MAVSDK 와 불일치 흉내
+        self.on_step = None                           # _step 마다 호출되는 훅 (시간 기반 고장 주입)
 
     async def connect(self):
         pass
@@ -114,6 +122,8 @@ class FakeDrone(object):
         self._step()
 
     def _step(self):
+        if self.on_step is not None:
+            self.on_step(self)
         if self.landing:
             self.d += (0.0 - self.d) * 0.4
             if abs(self.d) < 0.03:
@@ -134,8 +144,12 @@ class FakeDrone(object):
             return
         self.ts_ms += 50.0
         ox, oy, oz = self.POSE_OFFSET
+        ex, ey, ez = self.extra_pipe_offset
+        if self.vio_feed:
+            self.vehicle.update_vio({"quality": self.vio_quality, "features": self.vio_features, "state": self.vio_state,
+                                     "error_codes": "", "pos": None, "raw": "fake"})
         self.vehicle.update_pose("px4_vehicle_local_position", {
-            "voxl_ts_ms": self.ts_ms, "pos_x": self.n + ox, "pos_y": self.e + oy, "pos_z": self.d + oz,
+            "voxl_ts_ms": self.ts_ms, "pos_x": self.n + ox + ex, "pos_y": self.e + oy + ey, "pos_z": self.d + oz + ez,
             "roll_deg": 0.0, "pitch_deg": 0.0, "yaw_deg": util.yaw_to_360(self.yaw),
             "vel_x": 0.0, "vel_y": 0.0, "vel_z": 0.0, "raw": "fake",
         })
@@ -279,7 +293,8 @@ def fast_cfg(**kw):
     base = dict(h_tol=0.03, v_tol=0.06, stable_time=0.2, late_observe=0.5, move_timeout=6.0,
                 yaw_tol=3.0, yaw_stable_time=0.2, takeoff_speed=2.0, takeoff_hover_time=0.2,
                 preland_alt=0.2, preland_speed=2.0, preland_hover_time=0.2, pos_ok_hold_sec=0.1,
-                reach_pipe_timeout=3.0, csv_sample_sec=0.2, geofence_violation_sec=0.3)
+                reach_pipe_timeout=3.0, csv_sample_sec=0.2, geofence_violation_sec=0.3,
+                vio_gate_window_s=0.4, vio_quiet_s=0.0, vio_bad_abort_s=0.3, est_disagree_s=0.3)
     base.update(kw)
     return FlightConfig(**base)
 
@@ -914,6 +929,146 @@ try:
     ok("retries=0 keeps v14 behaviour (first rejection -> abort)", e3 is not None and d3.cmd_log.count("offboard_start") == 1 and v3.aborted, str(d3.cmd_log))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# 11b. VIO gate / in-flight VIO monitor / estimator disagreement / takeoff sanity (2026-11-10 incident)
+# ---------------------------------------------------------------------------
+
+print("\n[vio safety]")
+from s2flight import vio as s2vio  # noqa: E402
+_pl = s2vio.parse_voxl_inspect_vio_line
+ok("vio parse: header -> None", _pl(" dt(ms) |    T_imu_wrt_vio (m)   |Roll Pitch Yaw (deg)|features|quality| state| error_codes ") is None)
+_pv = _pl("   66.7 |   -0.05    0.05   -0.03|  -2.2    0.4  -70.9|    11  |   96% | OKAY | ")
+ok("vio parse: sample -> quality 96 features 11 OKAY pos", _pv["quality"] == 96 and _pv["features"] == 11 and _pv["state"] == "OKAY" and _pv["pos"] == (-0.05, 0.05, -0.03), repr(_pv))
+_pf = _pl("   66.7 |    0.00    0.00    0.02|   0.0    0.0    0.0|     0  |    0% | FAILED | 0x8 ")
+ok("vio parse: failed -> quality 0 features 0 FAILED 0x8", _pf["quality"] == 0 and _pf["features"] == 0 and _pf["state"] == "FAILED" and _pf["error_codes"] == "0x8")
+_h = s2vio.VioHistory()
+_h.add({"quality": 96, "features": 11, "state": "OKAY", "mono_time": 0.0})
+_h.add({"quality": -1, "features": 0, "state": "OKAY", "mono_time": 1.0})
+_h.add({"quality": -1, "features": 0, "state": "OKAY", "mono_time": 2.0})
+ok("vio history: bad_duration counts from first bad sample", near(_h.bad_duration(2.5), 1.5, 1e-9) and _h.n_bad_episodes == 1)
+_h.add({"quality": 80, "features": 9, "state": "OKAY", "mono_time": 3.0})
+ok("vio history: recovers", _h.bad_duration(3.1) == 0.0 and _h.summarize(3.0, 10.0)["min_quality"] == -1)
+
+tmp = tempfile.mkdtemp(prefix="s2f_")
+try:
+    # (a) 기본 FakeDrone (quality 96) 이면 게이트 통과 + 요약에 PASS
+    drone = FakeDrone()
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("vio gate PASS on healthy fake drone; flight completes", v.vio_gate_result and v.vio_gate_result["passed"] is True and seq["completed"],
+       str(v.vio_gate_result))
+    ok("vio gate event recorded", any(e["event"] == "vio_gate" and e["detail"] == "PASS" for e in rec.events))
+    ok("sync csv carries vio_quality column", any(r.get("vio_quality") not in (None, "") for r in rec.sync_rows) if hasattr(rec, "sync_rows") else True)
+
+    # (b) 품질 낮음 → PreflightAbort, arm 안 함
+    drone = FakeDrone()
+    drone.vio_quality = 10
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("vio gate FAIL on low quality -> PreflightAbort, never armed", err is not None and "quality" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+    # (c) 특징점 0 → 거부
+    drone = FakeDrone()
+    drone.vio_features = 0
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("vio gate FAIL on zero features", err is not None and "features" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+    # (d) 지상 정지인데 파이프가 흐름 → 거부 (사고: 3 s 에 0.45 m)
+    drone = FakeDrone()
+    def _drift(d):
+        d.extra_pipe_offset = (0.0, 0.0, d.extra_pipe_offset[2] + 0.015)     # 매 스텝 15 mm (20 Hz) → 0.4 s 창에 ~12 cm (한계 3 cm)
+    drone.on_step = _drift
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("vio gate FAIL on static feedback drift", err is not None and ("drifted" in str(err) or "disagree" in str(err)) and "arm" not in drone.cmd_log, str(err))
+
+    # (e) 비행 중 VIO 상실 → 비상 착륙
+    drone = FakeDrone()
+    _state = {"t": None}
+    def _lose(d):
+        if d.in_air_flag and _state["t"] is None:
+            _state["t"] = time.monotonic()
+        if _state["t"] is not None and time.monotonic() - _state["t"] > 0.3:
+            d.vio_quality = -1
+    drone.on_step = _lose
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("in-flight VIO loss -> emergency land with VIO LOST reason", v.aborted and "VIO LOST" in (v.abort_reason or "") and "land" in drone.cmd_log, str(v.abort_reason))
+    ok("vio_bad event recorded", any(e["event"] == "vio_bad" for e in rec.events))
+
+    # (f) 비행 중 파이프 vs MAVSDK 불일치 → 비상 착륙
+    drone = FakeDrone()
+    _state2 = {"t": None}
+    def _split(d):
+        if d.in_air_flag and _state2["t"] is None:
+            _state2["t"] = time.monotonic()
+        if _state2["t"] is not None and time.monotonic() - _state2["t"] > 0.3:
+            d.extra_pipe_offset = (0.0, 0.0, 0.6)          # 파이프 고도만 0.6 m 어긋남
+    drone.on_step = _split
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("in-flight estimator disagreement -> emergency land", v.aborted and "DISAGREEMENT" in (v.abort_reason or "") and "land" in drone.cmd_log, str(v.abort_reason))
+
+    # (g) 이륙 직전 오프셋 → 이륙 거부 (게이트 뒤에 갑자기 흘렀을 때)
+    drone = FakeDrone()
+    async def _takeoff_refused():
+        rec2 = FlightRecorder(fast_cfg(), out_dir=tmp, prefix="tr")
+        vv = Vehicle(rec2.cfg, recorder=rec2, drone=drone, pose_readers=False, initial_yaw=drone.yaw)
+        drone.vehicle = vv
+        await vv.connect()
+        await vv.wait_position_stable(timeout=5.0)
+        await vv.check_vio_quality_preflight(samples=2)
+        await vv.capture_initial_mavsdk_position(samples=3, interval=0.05)
+        await vv.start_monitors_and_offboard(prime_sec=0.3)
+        drone.extra_pipe_offset = (0.0, 0.0, -0.4)           # 게이트 통과 직후 파이프가 0.4 m 점프
+        await asyncio.sleep(0.2)
+        okk = await vv.takeoff(0.5)
+        await asyncio.sleep(0.3)
+        await vv.cancel_background_tasks()
+        return vv, okk
+    vv, okk = loop.run_until_complete(_takeoff_refused())
+    ok("takeoff refused when on-ground offset > limit", okk is False and "TAKEOFF REFUSED" in (vv.abort_reason or ""), str(vv.abort_reason))
+
+    # (h) --no-vio-gate 면 게이트 생략 (요약에 disabled)
+    drone = FakeDrone()
+    drone.vio_quality = 10
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(vio_gate=False), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("--no-vio-gate skips the gate (disabled) and flies", v.vio_gate_result["passed"] is None and seq["completed"])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# 12. ASCII stdout (vehicle ssh locale) -> force_utf8_stdio
+# ---------------------------------------------------------------------------
+
+print("\n[utf8 stdio]")
+import io as _io
+_saved_out, _saved_err = sys.stdout, sys.stderr
+try:
+    _raw = _io.BytesIO()
+    sys.stdout = _io.TextIOWrapper(_raw, encoding="ascii", errors="strict")
+    _changed = util.force_utf8_stdio()
+    print("Starling 2 \u2014 \ud55c\uae00 ok")
+    sys.stdout.flush()
+    _bytes = _raw.getvalue()
+finally:
+    sys.stdout, sys.stderr = _saved_out, _saved_err
+ok("force_utf8_stdio wraps ASCII stdout and prints em-dash/Korean", _changed and "\u2014".encode("utf-8") in _bytes and "\ud55c\uae00".encode("utf-8") in _bytes, repr(_bytes[:60]))
+try:
+    sys.stdout = _io.TextIOWrapper(_io.BytesIO(), encoding="utf-8")
+    sys.stderr = _io.TextIOWrapper(_io.BytesIO(), encoding="utf-8")
+    _noop = util.force_utf8_stdio() is False
+finally:
+    sys.stdout, sys.stderr = _saved_out, _saved_err
+ok("force_utf8_stdio is a no-op on UTF-8 stdout/stderr", _noop)
 
 # ---------------------------------------------------------------------------
 

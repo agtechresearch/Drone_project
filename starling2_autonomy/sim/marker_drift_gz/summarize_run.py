@@ -37,6 +37,11 @@ def summarize(d):
     print("result: completed=%s landed_in_place=%s exception=%s initial_yaw=%s(%s)" % (
         seq.get("completed"), seq.get("landed_in_place"), seq.get("exception"),
         (s.get("vehicle") or {}).get("initial_yaw_deg"), (s.get("vehicle") or {}).get("initial_yaw_source")))
+    veh = s.get("vehicle") or {}
+    g = veh.get("vio_gate")
+    gs = g if not isinstance(g, dict) else ("PASS" if g.get("passed") else ("disabled" if g.get("passed") is None else "FAIL: %s" % g.get("reason")))
+    print("safety: vio_gate=%s | abort=%s | preflight_abort=%s | vio_samples=%s bad_episodes=%s" % (
+        gs, veh.get("abort_reason"), s.get("preflight_abort"), veh.get("vio_samples"), veh.get("vio_bad_episodes")))
     a = seq.get("align") or {}
     print("align : %s  err %.2f deg  %s" % (a.get("state"), fnum(a.get("final_yaw_error_deg")), a.get("reason")))
     c = seq.get("center") or {}

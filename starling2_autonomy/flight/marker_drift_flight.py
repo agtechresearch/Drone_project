@@ -57,8 +57,8 @@ from s2flight.drift import BannerLayout, DriftMonitor, center_on_tag  # noqa: E4
 from s2flight.recorder import FlightRecorder                        # noqa: E402
 from s2flight.sim import DEFAULT_TAG_PORT, UdpTagFeed               # noqa: E402
 from s2flight.tags import MpaTagFeed                                # noqa: E402
-from s2flight.util import log, set_log_file                         # noqa: E402
-from s2flight.vehicle import Vehicle                                # noqa: E402
+from s2flight.util import log, set_log_file, force_utf8_stdio      # noqa: E402
+from s2flight.vehicle import Vehicle, PreflightAbort                                # noqa: E402
 from s2flight.voxl_logger import VoxlLogger                         # noqa: E402
 
 DEFAULT_OUT_ROOT = "/home/root/marker_drift_logs"
@@ -350,6 +350,10 @@ def print_banner(args, params, cfg, out_dir):
                                         "zero": "VIO power-on heading (v14 behaviour)"}.get(mode, "fixed yaw {:+.1f} deg".format(val or 0.0))))
     print("  Reach judge   : {} '{}'  (h_tol {:.2f} m, v_tol {:.2f} m)".format(
         "MAVSDK telemetry as" if cfg.sim else "voxl-inspect-pose -n", cfg.reach_pipe, cfg.h_tol, cfg.v_tol))
+    print("  VIO gate      : {}".format("OFF (--no-vio-gate) !!!" if not cfg.vio_gate else
+          "pipe {} | arm: quality>={} features>={} window {:.0f}s static<={:.2f}m quiet {:.0f}s | flight: lost>={:.1f}s / stale>={:.1f}s / pipe-vs-MAVSDK dV>{:.1f} dH>{:.1f} for {:.1f}s -> LAND | takeoff offset<={:.2f}m".format(
+              cfg.vio_pipe, cfg.vio_min_quality, cfg.vio_min_features, cfg.vio_gate_window_s, cfg.vio_static_drift_m, cfg.vio_quiet_s,
+              cfg.vio_bad_abort_s, cfg.vio_stale_abort_s, cfg.est_disagree_v_m, cfg.est_disagree_h_m, cfg.est_disagree_s, cfg.takeoff_fb_max_offset_m)))
     print("  Geofence      : {}".format("OFF" if cfg.no_geofence else "track h<={:.1f} v<={:.1f} m, persist {:.1f}s".format(
         cfg.max_horizontal_dev, cfg.max_alt_deviation, cfg.geofence_violation_sec)))
     print("  Tag source    : {}{}".format("udp://127.0.0.1:{}".format(args.sim_tag_port) if cfg.sim else args.tag_pipe,
@@ -415,6 +419,14 @@ async def main_async(args, params, cfg, out_dir, prefix):
         await v.start_monitors_and_offboard()
         seq = await run_sequence(v, params, feed=feed, recorder=rec)
         rec.summary["sequence"] = seq
+    except PreflightAbort as e:
+        log("PREFLIGHT ABORT (not armed): {}".format(e))
+        rec.summary["preflight_abort"] = str(e)
+        exit_code = 3
+        try:
+            await v.cancel_background_tasks()
+        except Exception:
+            pass
     except Exception as e:
         log("Exception: {!r}".format(e))
         rec.summary["exception"] = repr(e)
@@ -445,6 +457,7 @@ async def main_async(args, params, cfg, out_dir, prefix):
 
 
 def main():
+    force_utf8_stdio()          # 기체 ASCII 로케일 대비 (2026-11-10)
     parser = build_arg_parser()
     args = parser.parse_args()
     if args.distance <= 0 or args.altitude <= 0 or args.speed <= 0:

@@ -10,6 +10,7 @@
 
 import math
 import re
+import sys
 import time
 from datetime import datetime
 
@@ -42,6 +43,54 @@ def set_log_file(path):
         _LOG_FILE = None
     if path:
         _LOG_FILE = open(path, "a", encoding="utf-8")
+
+
+def force_utf8_stdio():
+    """기체 ssh 비대화형 셸은 LANG 이 비어 stdout 이 ASCII 다(2026-11-10 실기: '—' 출력에서 UnicodeEncodeError 로 비행 전 중단).
+    stdout/stderr 를 UTF-8(errors=replace) 로 감싼다. 이미 UTF-8 이면 그대로. 반환: 바꿨으면 True."""
+    import io as _io
+    changed = False
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        enc = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if stream is None or enc == "utf8":
+            continue
+        buf = getattr(stream, "buffer", None)
+        if buf is None:
+            continue
+        try:
+            w = _io.TextIOWrapper(buf, encoding="utf-8", errors="replace", line_buffering=True)
+        except Exception:
+            continue
+        _UTF8_WRAPPERS.append((name, stream, w))
+        setattr(sys, name, w)
+        changed = True
+    if changed and not _UTF8_ATEXIT[0]:
+        import atexit
+        atexit.register(release_utf8_stdio)
+        _UTF8_ATEXIT[0] = True
+    return changed
+
+
+_UTF8_WRAPPERS = []
+_UTF8_ATEXIT = [False]
+
+
+def release_utf8_stdio():
+    """force_utf8_stdio 가 끼운 래퍼를 flush 후 detach 해 원래 스트림을 되돌린다. 래퍼가 GC 되며 버퍼를 닫아
+    'lost sys.stderr' 가 나는 것을 막는다(종료 시 atexit 로 자동 호출, 테스트에서는 직접 호출)."""
+    while _UTF8_WRAPPERS:
+        name, orig, w = _UTF8_WRAPPERS.pop()
+        try:
+            w.flush()
+        except Exception:
+            pass
+        try:
+            w.detach()
+        except Exception:
+            pass
+        if getattr(sys, name, None) is w:
+            setattr(sys, name, orig)
 
 
 def log(msg):

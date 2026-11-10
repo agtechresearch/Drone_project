@@ -173,10 +173,10 @@ Drone_project/starling2_autonomy/
 │   ├── mpa_tag_detections.py          tag_detections 구독기 (voxl-tag-detector 출력, 위 클라이언트 상속)
 │   ├── tag_align.py                   태그 정렬: 두 태그 연결선 → yaw 오차, 폐루프 상태기계 (s2flight.align 의 원본)
 │   ├── s2flight/                      실험 비행 공용 패키지 (py3.6, numpy 없음): vehicle·geofence·pose·recorder(v14 분해),
-│   │                                  tags·align·mpa(사본), voxl_logger, align_stage. README 참조
+│   │                                  tags·align·mpa(사본), voxl_logger, align_stage, **vio**(voxl-inspect-vio 리더·게이트, 2026-11-10 사고 대책). README 참조
 │   ├── marker_drift_flight.py         마커 드리프트 실험 진입 스크립트 (docs/09 §5.2 시퀀스, s2flight 위에서 동작)
 │   ├── legacy/                        v13·CR·초기판 (참조용, 배포 안 함)
-│   └── tools_onboard/                 기체에서 돌리는 보조 스크립트
+│   └── tools_onboard/                 기체에서 돌리는 보조 스크립트 (mpa_capture.py, **vio_check.py** 이륙 전 VIO 점검 PASS/FAIL)
 ├── sim/                   ← 시뮬레이션 (연구실 서버 drone_sim_gz 와 연동)
 │   ├── handoff_2026-10-27/            SITL 재현용 인계 자료 (PX4 파라미터 덤프·물리값·ulog)
 │   └── marker_drift_gz/               드리프트 실험 SITL 선검증: 현수막 월드 생성기, 시뮬 태그 검출기(UDP), 월드 설치,
@@ -193,7 +193,7 @@ Drone_project/starling2_autonomy/
     ├── test_mpa_tag_detections.py     태그 검출 파서 49항목 검증
     ├── test_tag_align.py              태그 정렬 측정·컨트롤러 74항목 검증 (가짜 카메라·가짜 기체)
     ├── test_marker_drift.py           마커 드리프트 파이프라인 70항목 검증 (venv 필요)
-    ├── test_s2flight.py               s2flight 패키지 148항목: 태그 정지 시퀀스(FakeBannerCamera) 포함, 단위 + 가짜 MAVSDK·가짜 벽 카메라로 실험 시퀀스 전체 + SITL 모드(--sim, UDP 태그)
+    ├── test_s2flight.py               s2flight 패키지 166항목(VIO 게이트·감시·불일치·이륙 거부 포함): 태그 정지 시퀀스(FakeBannerCamera) 포함, 단위 + 가짜 MAVSDK·가짜 벽 카메라로 실험 시퀀스 전체 + SITL 모드(--sim, UDP 태그)
     └── marker_drift/                  docs/09 후처리 패키지: coverage·calibrate·detect·noise·analyze·compare
         ├── README.md                  사용법·좌표계·손 촬영 검증 절차
         └── layouts/lab_default.yaml   기본 마커 배치 (설치 후 실측값으로 갱신)

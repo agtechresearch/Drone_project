@@ -12,6 +12,8 @@
 #      KEEP_SITL(0 = 끝나면 인스턴스 정지) NO_TAGS(0)
 #      INJECT('{}') vio_relay.py 오차 주입 JSON: rot_deg(VIO 프레임 회전 °), drift_n/drift_e(m/s), step_e/step_at(m, 이륙 후 s),
 #                   noise_pos_m/noise_vel_m_s. 산출물 inject.json 에 남는다.
+#      VIO_FAIL_AT=<s> [VIO_FAIL_FROM=offboard|start] [VIO_FAIL_JSON=<json>] [VIO_RECOVER_AFTER=<s>]: offboard 시작(기본) s 초 뒤 시뮬 VIO 상태를 상실로 바꿔
+#                   비행 코드의 VIO 감시(비상 착륙)를 검증한다 (s2flight.sim.sim_vio_task, 2026-11-10 사고 대책).
 set -u
 N=${INSTANCE:-2}; case "$N" in 2|3|4|5) ;; *) echo "!! INSTANCE=$N 은 허용되지 않음 (2..5; 0/1 은 다른 작업대)"; exit 2;; esac
 SIM=${SIM:-$HOME/starling_sim}; V3=$SIM/v3_marker; SC=$V3/scripts; MD=${MD:-$SIM/marker_drift}
@@ -79,10 +81,22 @@ fi
 sleep 4
 [ -f "$OUT/tag_detect.log" ] && head -2 "$OUT/tag_detect.log"
 
+# 3b. 시뮬 VIO 상태 파일 (s2flight.sim.sim_vio_task 가 0.5 s 마다 읽음). VIO_FAIL_AT=<s> 면 비행 시작 s 초 뒤 VIO 상실을 주입한다
+#     (VIO_FAIL_JSON 기본 {"quality": -1, "state": "FAILED", "features": 0}; VIO_RECOVER_AFTER=<s> 면 그 뒤 복구). 2026-11-10 사고 대책 검증용.
+VIO_FILE="$OUT/sim_vio.json"; echo "{}" > "$VIO_FILE"
+echo "vio_fail_at=${VIO_FAIL_AT:-}" >> "$OUT/args.txt"
+if [ -n "${VIO_FAIL_AT:-}" ]; then
+  # 기준 시각: VIO_FAIL_FROM=offboard(기본, 'Offboard active!' 가 mission.log 에 찍힌 뒤) | start(비행 스크립트 기동 시점)
+  ( if [ "${VIO_FAIL_FROM:-offboard}" = "offboard" ]; then
+      for i in $(seq 1 600); do grep -q "Offboard active" "$OUT/mission.log" 2>/dev/null && break; sleep 0.5; done; fi
+    sleep "$VIO_FAIL_AT"; echo "${VIO_FAIL_JSON:-{\"quality\": -1, \"state\": \"FAILED\", \"features\": 0}}" > "$VIO_FILE"; echo "[sim] VIO FAIL injected at +${VIO_FAIL_AT}s after ${VIO_FAIL_FROM:-offboard}" >> "$OUT/mission.log"
+    if [ -n "${VIO_RECOVER_AFTER:-}" ]; then sleep "$VIO_RECOVER_AFTER"; echo "{}" > "$VIO_FILE"; echo "[sim] VIO recovered" >> "$OUT/mission.log"; fi ) &
+fi
+
 # 4. 비행 (starling-flight: Python 3.6.9 + MAVSDK 0.12.0)
 step "비행: marker_drift_flight.py --sim --port $MAVSDK_PORT $TAGARGS $*"
-docker exec -i starling-flight bash -c "cd $MD_IN_FLIGHT/flight && timeout -s INT ${MISSION_TIMEOUT:-600} python3 marker_drift_flight.py --sim --port $MAVSDK_PORT $TAGARGS --out-dir $OUT_IN_FLIGHT -y $*" 2>&1 \
-  | tee "$OUT/mission.log" | grep --line-buffered -E "^\[|\[align\]|REACHED|TIMEOUT|EMERGENCY|GEOFENCE|Traceback|Exception|Landed|Disarmed|OK |FAILED|WARNING" | cut -c1-160
+docker exec -i starling-flight bash -c "cd $MD_IN_FLIGHT/flight && S2_SIM_VIO_FILE=$OUT_IN_FLIGHT/sim_vio.json timeout -s INT ${MISSION_TIMEOUT:-600} python3 marker_drift_flight.py --sim --port $MAVSDK_PORT $TAGARGS --out-dir $OUT_IN_FLIGHT -y $*" 2>&1 \
+  | tee -a "$OUT/mission.log" | grep --line-buffered -E "^\[|\[align\]|\[vio|REACHED|TIMEOUT|EMERGENCY|GEOFENCE|PREFLIGHT|REFUSED|DISAGREE|Traceback|Exception|Landed|Disarmed|OK |FAILED|WARNING" | cut -c1-160
 RC=${PIPESTATUS[0]}
 
 # 5. 정리
@@ -94,8 +108,11 @@ S=$(ls "$OUT"/md_*_summary.json 2>/dev/null | head -1)
 import json, sys
 s = json.load(open(sys.argv[1]))
 seq = s.get("sequence") or {}
+veh = s.get("vehicle") or {}
 print("summary:", "completed" if seq.get("completed") else "NOT completed", "| aborted" if seq.get("aborted") else "",
-      "| align:", (seq.get("align") or {}).get("state", "-"), "| exception:", s.get("exception", "-"))
+      "| align:", (seq.get("align") or {}).get("state", "-"), "| exception:", s.get("exception", "-"),
+      "| preflight_abort:", s.get("preflight_abort", "-"))
+print("  vio_gate:", veh.get("vio_gate"), "| abort_reason:", veh.get("abort_reason"), "| vio_bad_episodes:", veh.get("vio_bad_episodes"))
 for r in (s.get("vehicle") or {}).get("results", [])[:20]:
     print("  %-16s %-8s %s" % (r.get("name"), r.get("status"), r.get("fb_end_rel", "")))
 EOF

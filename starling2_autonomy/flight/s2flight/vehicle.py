@@ -27,7 +27,8 @@ import math
 
 from .geofence import Geofence
 from .pose import pose_reader_task
-from .sim import sim_pose_task
+from .sim import sim_pose_task, sim_vio_task
+from .vio import VioHistory, vio_reader_task, journal_recent_vio_events
 from .util import (angle_diff_deg, body_delta_to_ned, evaluate_horizontal_tracking,
                    horizontal_norm, log, mono_time, normalize_angle_deg, wallclock, yaw_to_360)
 
@@ -50,6 +51,10 @@ except ImportError:                        # 기체 밖(테스트)에서는 가�
         def __repr__(self):
             return "PositionNedYaw(N{:+.3f} E{:+.3f} D{:+.3f} yaw{:+.1f})".format(
                 self.north_m, self.east_m, self.down_m, self.yaw_deg)
+
+
+class PreflightAbort(RuntimeError):
+    """arm 전에 안전 조건이 안 맞아 비행을 시작하지 않음 (비상정지 아님, 모터 안 돌았음)."""
 
 
 class Vehicle(object):
@@ -99,6 +104,14 @@ class Vehicle(object):
         self.reach_initial_raw = None
 
         self.geofence = Geofence(cfg)
+        # VIO 상태 (2026-11-10 사고 대책): 게이트·비행 중 감시·추정기 불일치
+        self.vio = VioHistory()
+        self.vio_task = None
+        self.vio_mon_task = None
+        self.vio_gate_result = None
+        self.offboard_active = False
+        self._est_disagree_since = None
+        self._vio_was_bad = False
         self._emergency_lock = asyncio.Lock()
         self._emergency_triggered = False
         self._stream_fail_count = 0
@@ -158,6 +171,21 @@ class Vehicle(object):
             log("[voxl] {} initial pose: x={:+.3f} y={:+.3f} z={:+.3f} ts_ms={:.0f}".format(
                 pipe_name, parsed["pos_x"], parsed["pos_y"], parsed["pos_z"],
                 parsed.get("voxl_ts_ms", float("nan"))))
+
+    def update_vio(self, parsed):
+        """VIO 상태 리더(또는 시뮬·테스트)가 샘플을 넣는다. 불량 전이를 로그·이벤트로 남긴다."""
+        if "mono_time" not in parsed:
+            parsed["mono_time"] = self.now()
+        bad = self.vio.add(parsed, min_quality=self.cfg.vio_inflight_min_quality)
+        self._extra_sync["vio_quality"] = parsed.get("quality", -1)
+        self._extra_sync["vio_features"] = parsed.get("features", -1)
+        self._extra_sync["vio_state"] = parsed.get("state", "")
+        if bad != self._vio_was_bad:
+            self._vio_was_bad = bad
+            msg = "quality={} features={} state={} err={}".format(parsed.get("quality"), parsed.get("features"),
+                                                                  parsed.get("state"), parsed.get("error_codes"))
+            log("[vio] {} {}".format("BAD" if bad else "ok", msg))
+            self.event("vio_bad" if bad else "vio_ok", msg)
 
     def feedback_state(self):
         """reach 파이프 포즈를 명령 N/E/D 프레임으로 맞춘 값. 준비 전이면 None."""
@@ -328,6 +356,92 @@ class Vehicle(object):
         raise RuntimeError("Reach feedback pipe '{}' did not produce valid pose within {:.1f}s".format(
             self.reach_pipe, timeout))
 
+    async def preflight_vio_gate(self, window_s=None):
+        """arm 직전 VIO 게이트 (2026-11-10 사고 대책 P1/P4). 조건 하나라도 실패하면 PreflightAbort.
+
+        1) 최근 vio_quiet_s 안에 open-vins 저널에 BAD 전이/리셋 없음 (journalctl 없으면 생략)
+        2) window_s 동안: VIO 샘플 있음, 최소 품질 >= vio_min_quality, 상태 모두 OKAY, 최소 특징점 >= vio_min_features
+        3) 같은 창에서 reach 파이프와 MAVSDK 상대 위치 변동 <= vio_static_drift_m (지상 정지인데 흐르면 추정기가 이미 깨진 것)
+        4) 창 끝에서 파이프 vs MAVSDK 상대 위치 차 <= est_disagree 의 절반
+        """
+        cfg = self.cfg
+        window_s = cfg.vio_gate_window_s if window_s is None else window_s
+        if not cfg.vio_gate:
+            log("       [vio-gate] DISABLED by --no-vio-gate — VIO 품질을 보지 않고 arm 한다 (권장 안 함)")
+            self.vio_gate_result = {"passed": None, "reason": "disabled"}
+            self.event("vio_gate", "disabled")
+            return
+        log("       [vio-gate] window {:.1f}s: quality>={} features>={} state OKAY, static drift<={:.2f}m, journal quiet {:.0f}s".format(
+            window_s, cfg.vio_min_quality, cfg.vio_min_features, cfg.vio_static_drift_m, cfg.vio_quiet_s))
+        journal = None
+        if cfg.vio_quiet_s > 0 and not self.sim:
+            journal = await journal_recent_vio_events(cfg.vio_quiet_s)
+            if journal is None:
+                log("       [vio-gate] journalctl unavailable — skipping quiet-period check")
+            elif journal:
+                for l in journal[-4:]:
+                    log("       [vio-gate] journal: {}".format(l[-110:]))
+                self._gate_fail("open-vins BAD/reset within last {:.0f}s ({} lines) — wait and re-check".format(
+                    cfg.vio_quiet_s, len(journal)))
+        t0 = self.now()
+        fb_pts, mav_pts = [], []
+        while self.now() - t0 < window_s:
+            fb = self.feedback_state()
+            if fb is not None:
+                fb_pts.append((fb["rel_n"], fb["rel_e"], fb["rel_u"]))
+            mav_pts.append(self.mav_rel_position())
+            if self.aborted:
+                self._gate_fail("vehicle aborted during gate: {}".format(self.abort_reason))
+            await asyncio.sleep(0.1)
+        now = self.now()
+        summ = self.vio.summarize(now, window_s + 0.5)
+        def _range(pts):
+            if len(pts) < 2:
+                return 0.0
+            return max(max(p[i] for p in pts) - min(p[i] for p in pts) for i in range(3))
+        fb_rng, mav_rng = _range(fb_pts), _range(mav_pts)
+        dv = dh = float("nan")
+        if fb_pts:
+            f, m = fb_pts[-1], mav_pts[-1]
+            dv = abs(f[2] - m[2])
+            dh = math.sqrt((f[0] - m[0]) ** 2 + (f[1] - m[1]) ** 2)
+        result = {"passed": True, "window_s": window_s, "vio_n": summ["n"], "min_quality": summ["min_quality"],
+                  "mean_quality": summ["mean_quality"], "min_features": summ["min_features"], "n_not_ok": summ["n_not_ok"],
+                  "fb_range_m": fb_rng, "mav_range_m": mav_rng, "disagree_v_m": dv, "disagree_h_m": dh,
+                  "journal_events": (len(journal) if journal is not None else None)}
+        self.vio_gate_result = result
+        log("       [vio-gate] samples={} quality min {} mean {:.0f} features min {} not_ok {} | drift fb {:.3f} mav {:.3f} m | fb-mav dV {:.3f} dH {:.3f} m".format(
+            summ["n"], summ["min_quality"], summ["mean_quality"], summ["min_features"], summ["n_not_ok"], fb_rng, mav_rng, dv, dh))
+        if summ["n"] == 0:
+            self._gate_fail("no VIO status samples (voxl-inspect-vio -n {} not running?)".format(cfg.vio_pipe), result)
+        if summ["min_quality"] < cfg.vio_min_quality:
+            self._gate_fail("VIO quality min {} < {}".format(summ["min_quality"], cfg.vio_min_quality), result)
+        if summ["n_not_ok"] > 0:
+            self._gate_fail("VIO state not OKAY in {} samples".format(summ["n_not_ok"]), result)
+        if summ["min_features"] >= 0 and summ["min_features"] < cfg.vio_min_features:
+            self._gate_fail("VIO features min {} < {} (featureless view?)".format(summ["min_features"], cfg.vio_min_features), result)
+        if not fb_pts:
+            self._gate_fail("no reach-pipe feedback during gate window", result)
+        if fb_rng > cfg.vio_static_drift_m:
+            self._gate_fail("feedback pipe drifted {:.3f} m in {:.1f}s while on ground (limit {:.2f})".format(fb_rng, window_s, cfg.vio_static_drift_m), result)
+        if mav_rng > cfg.vio_static_drift_m:
+            self._gate_fail("MAVSDK position drifted {:.3f} m in {:.1f}s while on ground (limit {:.2f})".format(mav_rng, window_s, cfg.vio_static_drift_m), result)
+        if dv > cfg.est_disagree_v_m / 2.0 or dh > cfg.est_disagree_h_m / 2.0:
+            self._gate_fail("pipe vs MAVSDK disagree dV {:.3f} dH {:.3f} m before arm".format(dv, dh), result)
+        log("       [vio-gate] PASS")
+        self.event("vio_gate", "PASS", **dict((k, v) for k, v in result.items() if k != "passed"))
+
+    def _gate_fail(self, reason, result=None):
+        if result is not None:
+            result["passed"] = False
+            result["reason"] = reason
+            self.vio_gate_result = result
+        else:
+            self.vio_gate_result = {"passed": False, "reason": reason}
+        log("!!! [vio-gate] FAIL: {} — NOT ARMING !!!".format(reason))
+        self.event("vio_gate", "FAIL: " + reason)
+        raise PreflightAbort("VIO gate: " + reason)
+
     # ------------------------------------------------------------------
     # 감시 태스크
     # ------------------------------------------------------------------
@@ -355,7 +469,52 @@ class Vehicle(object):
                 (self.initial_x, self.initial_y, self.initial_z))
             if reason:
                 asyncio.ensure_future(self.trigger_emergency_land(reason))
+            self._check_estimator_disagreement()
             await asyncio.sleep(0.05)
+
+    def _check_estimator_disagreement(self):
+        """reach 파이프(VIO 경로) 와 MAVSDK(EKF) 상대 위치가 갈라지면 비상 착륙 (P3). 사고 때 1 s 만에 0.58 m 벌어졌다."""
+        cfg = self.cfg
+        if not cfg.vio_gate or not self.offboard_active or self.aborted:
+            return
+        fb = self.feedback_state()
+        if fb is None or fb["age_sec"] > 0.5:
+            return
+        mn, me, mu = self.mav_rel_position()
+        dv = abs(fb["rel_u"] - mu)
+        dh = math.sqrt((fb["rel_n"] - mn) ** 2 + (fb["rel_e"] - me) ** 2)
+        self._extra_sync["est_dv"] = round(dv, 3)
+        self._extra_sync["est_dh"] = round(dh, 3)
+        now = self.now()
+        if dv > cfg.est_disagree_v_m or dh > cfg.est_disagree_h_m:
+            if self._est_disagree_since is None:
+                self._est_disagree_since = now
+                log("       [est] pipe vs MAVSDK disagree dV {:.2f} dH {:.2f} m — watching {:.1f}s".format(dv, dh, cfg.est_disagree_s))
+            elif now - self._est_disagree_since >= cfg.est_disagree_s:
+                asyncio.ensure_future(self.trigger_emergency_land(
+                    "ESTIMATOR DISAGREEMENT: pipe vs MAVSDK dV {:.2f} dH {:.2f} m for {:.1f}s".format(dv, dh, now - self._est_disagree_since)))
+        else:
+            self._est_disagree_since = None
+
+    async def _vio_monitor(self):
+        """비행 중 VIO 품질·신선도 감시 (P2). offboard 시작 뒤부터 동작."""
+        cfg = self.cfg
+        while self.monitoring and not self.aborted:
+            if cfg.vio_gate and self.offboard_active:
+                now = self.now()
+                if self.vio.n > 0 and self.vio.age(now) > cfg.vio_stale_abort_s:
+                    asyncio.ensure_future(self.trigger_emergency_land(
+                        "VIO STATUS STALE {:.1f}s (voxl-inspect-vio died?)".format(self.vio.age(now))))
+                elif self.vio.bad_duration(now) >= cfg.vio_bad_abort_s:
+                    l = self.vio.latest or {}
+                    asyncio.ensure_future(self.trigger_emergency_land(
+                        "VIO LOST: quality={} state={} features={} for {:.1f}s".format(
+                            l.get("quality"), l.get("state"), l.get("features"), self.vio.bad_duration(now))))
+                fb = self.feedback_state()
+                if fb is not None and fb["age_sec"] > cfg.feedback_stale_abort_s:
+                    asyncio.ensure_future(self.trigger_emergency_land(
+                        "FEEDBACK PIPE STALE {:.1f}s ({})".format(fb["age_sec"], self.reach_pipe)))
+            await asyncio.sleep(0.1)
 
     async def _health_monitor(self):
         consecutive_bad = 0
@@ -421,10 +580,19 @@ class Vehicle(object):
                     pose_reader_task(pipe, self.update_pose, self._is_running, self.voxl_reader_errors)))
         if self.rec is not None:
             self.sync_task = asyncio.ensure_future(self._sync_sampler())
+        if self.cfg.vio_gate:
+            if self.sim:
+                self.vio_task = asyncio.ensure_future(sim_vio_task(self, self._is_running))
+            elif self.pose_readers:
+                self.vio_task = asyncio.ensure_future(vio_reader_task(self.cfg.vio_pipe, self.update_vio, self._is_running,
+                                                                      self.voxl_reader_errors))
+            self.vio_mon_task = asyncio.ensure_future(self._vio_monitor())
 
         await asyncio.sleep(min(1.0, prime_sec / 3.0))
         await self.wait_reach_pipe_ready()
-        await asyncio.sleep(max(0.0, prime_sec - min(1.0, prime_sec / 3.0)))
+        t_gate = self.now()
+        await self.preflight_vio_gate()          # 실패하면 PreflightAbort (arm 안 함)
+        await asyncio.sleep(max(0.0, prime_sec - min(1.0, prime_sec / 3.0) - (self.now() - t_gate)))
 
         log("[6/7] Arming...")
         await self.drone.action.arm()
@@ -451,6 +619,7 @@ class Vehicle(object):
                     self.event("offboard_retry", str(result))
                     await asyncio.sleep(self.cfg.offboard_retry_sec)
             log("       Offboard active!")
+            self.offboard_active = True
             self.geofence.arm((self.target.north_m, self.target.east_m, self.target.down_m))
             if self.geofence.armed:
                 log("       [geofence] ARMED: {}".format(self.geofence.describe()))
@@ -840,6 +1009,18 @@ class Vehicle(object):
         speed_mps = self.cfg.takeoff_speed if speed_mps is None else speed_mps
         hover_time = self.cfg.takeoff_hover_time if hover_time is None else hover_time
         log(">>> TAKEOFF to U{:.2f}m <<<".format(alt))
+        if self.cfg.vio_gate:
+            # P4: 지상인데 파이프/MAVSDK 가 원점에서 벗어나 있으면 추정기가 이미 흘렀다 → 이륙하지 않는다 (사고 때 파이프 U-0.45)
+            fb = self.feedback_state()
+            mn, me, mu = self.mav_rel_position()
+            off_mav = math.sqrt(mn * mn + me * me + mu * mu)
+            off_fb = math.sqrt(fb["rel_n"] ** 2 + fb["rel_e"] ** 2 + fb["rel_u"] ** 2) if fb is not None else float("inf")
+            lim = self.cfg.takeoff_fb_max_offset_m
+            if off_fb > lim or off_mav > lim:
+                reason = "TAKEOFF REFUSED: on-ground offset pipe {:.2f} m / MAVSDK {:.2f} m > {:.2f} (estimator drifted)".format(off_fb, off_mav, lim)
+                log("!!! {} !!!".format(reason))
+                await self.trigger_emergency_land(reason)
+                return False
         ok = await self.go_to_relative(self.plan_n, self.plan_e, alt, name, "UP", speed_mps=speed_mps)
         if hover_time > 0:
             await self.hover(hover_time, "post_" + name)
@@ -1110,7 +1291,7 @@ class Vehicle(object):
     async def cancel_background_tasks(self):
         self.streaming = False
         self.monitoring = False
-        tasks = [self.stream_task, self.mav_task, self.health_task, self.sync_task] + list(self.voxl_tasks)
+        tasks = [self.stream_task, self.mav_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
         for task in tasks:
             if task and not task.done():
                 task.cancel()
@@ -1174,6 +1355,7 @@ class Vehicle(object):
             "initial_yaw_deg": self.initial_yaw_deg, "initial_yaw_source": self.initial_yaw_source,
             "reach_pipe": self.reach_pipe,
             "aborted": self.aborted, "abort_reason": self.abort_reason,
+            "vio_gate": self.vio_gate_result, "vio_samples": self.vio.n, "vio_bad_episodes": self.vio.n_bad_episodes,
             "results": self.results, "snapshots": self.snapshots,
             "config": self.cfg.as_dict(),
         }

@@ -93,6 +93,19 @@ VNC 화면(`DISPLAY=:1`, 컨테이너에 X 소켓이 마운트돼 있다)에 Gaz
 docker exec -d -e DISPLAY=:1 -e QT_X11_NO_MITSHM=1 -e GZ_PARTITION=starling_2 starling-gz gz sim -g   # 인스턴스 2
 ```
 
+## VIO 상실 주입 (`VIO_FAIL_AT`, s2flight.sim.sim_vio_task) — 2026-11-10 사고 대책 검증
+
+SITL 에는 실제 VIO 가 없으므로 비행 코드의 VIO 상태 입력(`voxl-inspect-vio`)을 `sim_vio_task` 가 품질 100/OKAY 로 채운다.
+`VIO_FAIL_AT=<s>` 를 주면 비행 시작 s 초 뒤 `logs/<시각>_iN/sim_vio.json` 에 `{"quality": -1, "state": "FAILED", "features": 0}` 을 써서
+비행 코드의 비행 중 VIO 감시(0.5 s → 비상 착륙)를 발동시킨다. `VIO_FAIL_AT=0` 이면 arm 전 게이트가 거부해야 한다(exit 3, arm 없음).
+`VIO_FAIL_JSON`, `VIO_RECOVER_AFTER=<s>` 로 내용·복구를 바꾼다. 추정기 불일치(P3)는 SITL 에서 파이프 = MAVSDK 라 발동하지 않는다(단위테스트로 검증).
+
+```bash
+INSTANCE=2 sim/run_sim_drift.sh --condition A --run 7                 # 게이트 PASS + 정상 완료
+VIO_FAIL_AT=25 INSTANCE=3 sim/run_sim_drift.sh --condition V --run 1  # 이동 중 VIO 상실 → EMERGENCY LAND, abort_reason 'VIO LOST'
+VIO_FAIL_AT=0  INSTANCE=4 sim/run_sim_drift.sh --condition G --run 1  # 게이트 FAIL → PREFLIGHT ABORT, arm 없음
+```
+
 ## 월드 기하 (`make_banner_world.py`)
 
 - 기체 스폰 (0, 0) 북향(gz yaw 1.5708; drone_sim_gz 규칙 — 다른 방향 스폰은 착지 시 yaw 점프를 만든다).

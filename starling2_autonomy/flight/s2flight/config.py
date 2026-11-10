@@ -39,6 +39,23 @@ class FlightConfig(object):
     mav_stale_warn_sec = 1.5
     feedback_stale_warn_sec = 0.8
 
+    # VIO 게이트 / 비행 중 감시 (2026-11-10 이륙 사고 대책 P1~P4, s2flight.vio). 끄려면 --no-vio-gate (권장 안 함)
+    vio_gate = True
+    vio_pipe = "ov"                 # voxl-inspect-vio 파이프 (open-vins 원출력). vvhub_aligned_vio 도 가능
+    vio_min_quality = 50             # 게이트: 창 안 최소 품질 %
+    vio_min_features = 3             # 게이트: 창 안 최소 특징점 수 (사고 때 0)
+    vio_gate_window_s = 3.0          # 게이트 관찰 창 s (정지 상태)
+    vio_quiet_s = 30.0               # 게이트: 최근 이 시간 안에 open-vins 저널에 BAD/리셋이 있으면 거부 (journalctl 없으면 생략)
+    vio_static_drift_m = 0.03        # 게이트: 창 안 파이프·MAVSDK 위치 변동 상한 m (사고 때 3 s 에 0.45 m)
+    est_disagree_v_m = 0.3           # 비행 중: 파이프 vs MAVSDK 수직 불일치 상한 m
+    est_disagree_h_m = 0.5           # 비행 중: 수평 불일치 상한 m
+    est_disagree_s = 0.5             # 불일치 지속 시간 → 비상 착륙
+    vio_inflight_min_quality = 1     # 비행 중: 품질이 이보다 낮거나(0, -1) 상태 != OKAY 면 불량
+    vio_bad_abort_s = 0.5            # 불량 지속 시간 → 비상 착륙 (사고 때 3.0 s 무효)
+    vio_stale_abort_s = 1.0          # VIO 상태 샘플이 이보다 오래 안 오면 비상 착륙
+    feedback_stale_abort_s = 1.0     # reach 파이프가 이보다 오래 안 오면 비상 착륙 (기존 0.8 s 는 경고만)
+    takeoff_fb_max_offset_m = 0.15   # 이륙 직전 파이프/MAVSDK 상대 위치가 원점에서 이보다 멀면 이륙 거부 (사고 때 0.45 m)
+
     # 지오펜스 (v14)
     no_geofence = False
     max_horizontal_dev = 2.5
@@ -143,6 +160,23 @@ class FlightConfig(object):
         g.add_argument("--voxl-pipes", nargs="*", default=list(FlightConfig.voxl_pipes),
                        help="voxl-inspect-pose -n 으로 같이 기록할 포즈 파이프")
         g.add_argument("--csv-sample-sec", type=float, default=FlightConfig.csv_sample_sec)
+        s = p.add_argument_group("VIO 게이트 / 비행 중 감시 (2026-11-10 사고 대책, s2flight.vio)")
+        s.add_argument("--no-vio-gate", dest="vio_gate", action="store_false", default=FlightConfig.vio_gate,
+                       help="VIO 게이트·감시를 끈다 (권장 안 함; 시뮬 디버그용)")
+        s.add_argument("--vio-pipe", dest="vio_pipe", default=FlightConfig.vio_pipe)
+        s.add_argument("--vio-min-quality", dest="vio_min_quality", type=int, default=FlightConfig.vio_min_quality)
+        s.add_argument("--vio-min-features", dest="vio_min_features", type=int, default=FlightConfig.vio_min_features)
+        s.add_argument("--vio-gate-window", dest="vio_gate_window_s", type=float, default=FlightConfig.vio_gate_window_s)
+        s.add_argument("--vio-quiet-sec", dest="vio_quiet_s", type=float, default=FlightConfig.vio_quiet_s,
+                       help="최근 이 시간 안 open-vins BAD/리셋이 있으면 arm 거부. 0 = 저널 검사 생략")
+        s.add_argument("--vio-static-drift", dest="vio_static_drift_m", type=float, default=FlightConfig.vio_static_drift_m)
+        s.add_argument("--est-disagree-v", dest="est_disagree_v_m", type=float, default=FlightConfig.est_disagree_v_m)
+        s.add_argument("--est-disagree-h", dest="est_disagree_h_m", type=float, default=FlightConfig.est_disagree_h_m)
+        s.add_argument("--est-disagree-sec", dest="est_disagree_s", type=float, default=FlightConfig.est_disagree_s)
+        s.add_argument("--vio-bad-abort-sec", dest="vio_bad_abort_s", type=float, default=FlightConfig.vio_bad_abort_s)
+        s.add_argument("--vio-stale-abort-sec", dest="vio_stale_abort_s", type=float, default=FlightConfig.vio_stale_abort_s)
+        s.add_argument("--feedback-stale-abort-sec", dest="feedback_stale_abort_s", type=float, default=FlightConfig.feedback_stale_abort_s)
+        s.add_argument("--takeoff-fb-max-offset", dest="takeoff_fb_max_offset_m", type=float, default=FlightConfig.takeoff_fb_max_offset_m)
         g.add_argument("--offboard-start-retries", type=int, default=FlightConfig.offboard_start_retries,
                        help="offboard 시작 거부(NO_SETPOINT_SET 등) 시 재시도 횟수. 0 = 즉시 비상정지(v14 동작)")
         g.add_argument("--offboard-retry-sec", type=float, default=FlightConfig.offboard_retry_sec)

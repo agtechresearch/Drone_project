@@ -4,8 +4,8 @@
 설계서 `docs/09_marker_drift_experiment_plan.md` 와 랩미팅 요약 `_brief.md` 는 "무엇을 할 것인가", 이 문서는 "실제로 무엇이 일어났는가".
 새 항목은 **§1 진행 기록** 끝에 날짜로 추가하고, 코드가 바뀌면 §2 패치노트, 문제를 겪으면 §3 트러블슈팅에도 한 줄씩 남긴다.
 
-**현재 상태 (2026-11-10 밤):** 코드 완성 · 서버 SITL 선검증 통과(정상 3 + 오류 주입 6 + 2열 동일 ID 2 + 시뮬 파일럿 9/9 + 태그 0~9 월드 1) · 마커 설치 중(태그 0~9) · 실기 비행 전 단계.
-남은 관문: 기체 태그 검출기 설정(승인) → 손 검출 부호 확인 → 짧은 호버 비행 → 본실험.
+**현재 상태 (2026-11-10 낮):** **실기 점검 비행 T1 사고(이륙 중 VIO 끊김 → 천장 근접 → 충돌) — 비행 금지.** 코드 v0.1.6 배포됨, 손 검출 시험 통과, SITL 21회 통과.
+남은 관문: 사고 대책 P1~P6 구현·SITL 검증 → 기체 외관 점검 → 사용자 허락 → 낮은 고도 점검 비행 → 파일럿.
 
 ---
 
@@ -81,16 +81,125 @@
 - 오늘 실기 계획(상단열 없이): 손 검출 시험 → 점검 비행 1회 → 파일럿 A·B 교대 3회씩(A B B A A B) → s 산출. C 는 상단열 설치 후.
 - 통로 폭(전방 현수막 ↔ 후방 장애물) **140 cm** 실측(사용자). 기체 이격 70 이면 후방도 70, 통로 중앙. docs/09 §0·§1.2·§4.1·§4.2 갱신. 통로 구간은 `--max-horizontal-dev 1.0` 권고 유지.
 
+### 2026-11-10 (밤) — 기체 세션 1: 배포·태그 검출기 설정·손 검출 시험
+- 기체 IP .139 → **192.168.45.203** (DHCP, 호스트키로 식별). `starling2_lab` 별칭 갱신, `.env.local` DRONE_HOST=starling2_lab. 부팅 3분 후 VIO 포즈 안정(±1 cm), CPU 50 °C.
+- `tools/deploy_pkg.sh -y` 로 v0.1.5(git e78f5ad) 배포: 15 파일 md5 일치, 기체 py3.6.9 문법 통과. 백업 `s2flight.bak.20261110-205509.tgz`.
+- **설정 변경(사용자 승인)**: `tag_locations.conf` id 0~10 size 0.20 + default 0.20 (당초 id 0 만 0.4), `voxl-tag-detector.conf` detector_0 skip_n_frames 5→1,
+  detector_1(tracking_down) enable false. 백업 `*.conf.bak.20261110-120019`. `systemctl start voxl-tag-detector` (enable 안 함, 재부팅 시 꺼짐). 파이프 `tag_detections` 생성, 15 Hz.
+- **손 검출 시험** (태그 10 을 전방 70 cm 에 고정, 30 s, `hand_test.py`): 태그 10 range **0.712 m** (실측 0.70 → 크기 0.20 설정 맞음), x −0.033 y −0.086 z 0.706,
+  σ_pos < 1 mm, **σ_yaw 0.19° → align-tol = max(1°, 3σ) = 1.0°** (기본 1.5 대신 `--align-tol 1.0`). 현수막 태그 1·2 도 보임: x ≈ −0.7 (카메라 **왼쪽**),
+  y ≈ −0.6 (위), z 0.57/1.03 (현수막이 전방으로 뛻어 있음) → 기체 왼쪽에 현수막, 전방 = ID 증가 방향이면 **x 부호 = 오른쪽 +** 확인. 태그 2(1.37 m, 비스듬한 각) 단일 yaw σ 14.6° —
+  단일 태그 yaw 모호성 재확인(설계대로 2태그 직선 맞춤 사용).
+
+### 2026-11-10 (낮) — **사고: 점검 비행 T1 이륙 중 천장 근접 상승 → 조종자 개입 → 책상 충돌**
+
+**비행 금지.** 원인 분석이 끝나고 아래 대책이 코드·절차에 들어가 사용자가 다시 허락하기 전까지 arm 하지 않는다.
+
+**타임라인** (기체 시각; 로그 `marker_drift_logs/20261110_122109_T1`, PX4 `sess179/log100.ulg`, voxl-logger `log0004`, 사본 `C:\Users\ericj\sim_logs\marker_drift\real_20261110\`)
+
+| 시각 | 사건 | 근거 |
+|---|---|---|
+| 12:24:40 | 첫 실행이 `Waiting for mavsdk_server` 에서 대기(서버 미기동). 사용자 Ctrl+C/Ctrl+Z (프로세스 7090 정지 상태로 남음, 연결 안 됨) | console 122440 |
+| 12:27:25 | 사용자가 `/home/mavsdk_server -p 50051 udp://:14551 &` 기동 | ps lstart |
+| 12:27:57 → 12:28:07 | **VIO GOOD→BAD → 하드 리셋**(Quality 0, Features 0, "System not stationary at initialization") | open-vins 저널 |
+| 12:28:15 → 12:28:23 | VIO BAD → 하드 리셋 (두 번째) | 저널 |
+| 12:28:17~28 | 스크립트 연결·프리플라이트 통과: `is_local_position_ok` 5회 OK, MAVSDK NED 10샘플 범위 D 1.6 cm | console |
+| 12:28:25 | VIO INITIAL→GOOD (리셋 후 2 s) | 저널 |
+| 12:28:28~29 | voxl-logger 시작(hires_small_color·ov·px4·imu), 포즈 리더 2개 시작 | console |
+| 12:28:30.7~34 | **지상 정지 상태에서 VIO 고도가 0.13 m/s 로 드리프트**(ov z 0.02→0.41, quality 15, features 0); 파이프 `fb_rel_u` 0→−0.45 | ov.csv, sync.csv |
+| 12:28:33.6 | arm. 12:28:34.6 offboard 시작, 이륙 램프(0.25 m/s, 파이프 기준 1.05 m 위) | console |
+| 12:28:35 | VIO GOOD→**BAD**. 12:28:35.9~39.0 PX4 `vehicle_visual_odometry.quality = −1`(무효 3.0 s) → **EKF 관성 추측항법** | 저널, ulog |
+| 12:28:35.9~37.4 | EKF z 0 → −0.59 m 로 상승 후 "도달" 유지(목표 0.6). MAVSDK `mav_rel_u` ≈ −0.2~0 | ulog, sync |
+| 12:28:39.0 | VIO 복귀(quality 74) 위치 z **−2.0 m** → EKF xy/z 리셋 카운터 +1, z −2.0 으로 점프 = **실제로는 천장 높이(≈2 m)까지 올라가 있었다** | ulog 2130.32 |
+| 12:28:40~42 | 수평 이동 x 0.25→3.1 m(조종자 개입 구간으로 추정), 12:28:42.1 **킬 스위치** → 낙하(vz +2~3 m/s) → 책상 충돌 | ulog, "Disarmed by kill-switch" |
+| 12:28:55~12:29:04 | 스크립트는 파이프 기준 16.4 s 타임아웃 → 착륙 명령·disarm 기록(이미 지상) | console |
+| 12:31:13 | 정지 상태에서 VIO 또 하드 리셋. 이후 안정 | 저널 |
+
+**직접 원인**: 이륙 순간 OpenVINS VIO 가 끊겼고(quality −1, 3.0 s), PX4 EKF 가 관성 추측항법으로 고도를 0.6 m 로 **과소 추정**한 채 위치 제어를 계속해 실제로는 약 2 m 까지 상승했다.
+2026-11-04 사고(리부팅 2 분 뒤 이륙, VIO 3 s 무효, z −2.2 리셋)와 **같은 메커니즘**이다.
+
+**기여 요인**
+1. **arm 전 VIO 가 이미 불안정**했다. 12:27:57~12:28:25 사이 하드 리셋 2회, arm 8 s 전에 막 재초기화된 상태. "리부팅 직후 VIO" 와 같은 조건이 리셋으로 재현됐다.
+   정지 상태에서 고도가 3 s 에 0.45 m 흘렀는데 어떤 검사도 이를 보지 않았다.
+2. **프리플라이트가 VIO 품질을 보지 않는다.** `is_local_position_ok`(PX4 EKF 관점) 와 MAVSDK 위치 범위만 본다. EKF 는 VIO 가 끊겨도 추측항법 중엔 OK 를 유지한다.
+   파이프(`px4_vehicle_local_position`, vision-hub) 와 MAVSDK 위치가 시작부터 0.39 m 어긋나 있었고 그 뒤 1 m 이상 벌어졌지만 비교하지 않았다.
+3. **지오펜스가 EKF(MAVSDK) 위치만 본다.** EKF 가 "0.6 m 도달" 이라고 믿었으므로 수직 편차 1.5 m 는 걸리지 않았다. 파이프 쪽은 −1.2 m 까지 벌어졌지만 지오펜스 입력이 아니다.
+4. **비행 중 VIO 품질 감시 없음.** `vehicle_visual_odometry.quality`/open-vins 상태가 −1/BAD 로 바뀌어도 코드가 알 수 없다.
+5. 부하: 같은 시점에 voxl-logger(hires 30 fps jpg) 시작, 태그 검출기 15 Hz(오늘 skip 5→1), 포즈 리더 2개. VIO 저하와 시간이 겹치나 인과는 미확정(CPU 총 28 %, 카메라 30 fps 유지).
+   VIO 가 정지 상태에서도 features 0 으로 떨어진 것은 **전방 카메라 시야의 특징점 부족**(현수막·벽) 가능성이 크다.
+6. 절차: 이륙 전 VIO 안정 확인(손으로 들어 움직여 보기, quality>0 확인)을 2026-11-04 메모에 적어 두고도 체크리스트에 넣지 않았다. mavsdk_server 수동 기동도 치트시트에 없었다.
+
+**기체 상태 (원격 점검, 12:31~12:40)**: disarm, ESC 4개 online·오류 0, 배터리 7.99 V, IMU 정상(수평), tracking_front/down **30 fps** 정상, VIO 정지 상태 quality 96·드리프트 없음(12:31:15 이후),
+CPU 28 %·35 °C. 서비스 모두 active. **프롭·암·카메라 렌즈·배터리 외관은 사용자가 직접 확인 필요.** 정지된 프로세스 7090 과 mavsdk_server 는 그대로 둠(비행 불가 상태).
+
+**대책 (제안, 승인 후 구현·SITL 검증 → 재배포)**
+- P1 프리플라이트 **VIO 게이트**: PX4 `vehicle_visual_odometry.quality` ≥ 임계(예 50)·open-vins 리셋 없이 ≥ 30 s 경과·정지 상태 파이프 고도 드리프트 < 3 cm/3 s·파이프 vs MAVSDK 위치 차 < 0.1 m. 하나라도 실패하면 arm 하지 않는다.
+- P2 **비행 중 VIO 감시**: quality < 0 또는 파이프 stale 0.5 s 이상 → 즉시 착륙(현재 고도 유지 후 하강). 추측항법 구간을 비행 코드가 메워 주지 않는다.
+- P3 지오펜스에 **파이프 vs EKF 불일치**(수직 0.3 m / 수평 0.5 m, 0.5 s 지속) 조건 추가. 둘이 갈라지면 어느 쪽이 맞든 안전하지 않다.
+- P4 이륙 램프를 EKF(MAVSDK) 기준으로도 상한(목표 + 0.3 m) 검사하고, 파이프 기준 기대 이동량이 명령 고도의 1.5 배를 넘으면(여기선 1.05 m vs 0.6) 이륙 전에 중단.
+- P5 절차: 체크리스트에 "mavsdk_server 기동 확인", "VIO 품질·리셋 확인(저널 `QUALITY` 최근 60 s 에 BAD 없음)", "기체를 들어 움직인 뒤 포즈 복귀 확인" 추가. 이륙 지점의 전방 카메라 시야에 특징점(텍스처) 확보. 로거는 이륙 후 hover_ref 에서 시작하는 옵션 검토.
+- P6 RC: 조종자 개입 절차를 "Position 모드 전환 → 하강" 으로 명문화(킬은 최후). 천장까지 1.4 m 여유에서 상승 속도 1 m/s 면 반응 시간이 1.4 s 뿐이다 → 실내 점검 비행은 고도 0.4 m, `--takeoff-speed` 0.15 로.
+
+### 2026-11-10 (오후) — 사고 대책 구현 v0.2.0 (사용자 승인 "그렇게 진행해줘"; 비행 없음)
+- **P1 VIO 게이트** (`vehicle.preflight_vio_gate`, arm 직전): ① open-vins 저널 최근 30 s 에 BAD/리셋 없음 ② 3 s 창에서 `voxl-inspect-vio -n ov` 품질 최소 ≥ 50,
+  상태 전부 OKAY, 특징점 최소 ≥ 3 ③ 같은 창에서 reach 파이프·MAVSDK 위치 변동 ≤ 3 cm ④ 파이프 vs MAVSDK 차 ≤ 0.15/0.25 m. 실패 → `PreflightAbort`(exit 3, arm 안 함).
+  사고 당시 값으로 대입하면 ①(리셋 2회) ②(features 0, quality 15) ③(0.45 m) 세 군데서 걸린다.
+- **P2 비행 중 VIO 감시** (`_vio_monitor`): 품질 < 1 또는 상태 ≠ OKAY 가 0.5 s 지속 → 비상 착륙. VIO 상태 샘플 1 s 끊김 → 비상 착륙. reach 파이프 1 s 끊김 → 비상 착륙(기존엔 경고만).
+  사고 당시 quality −1 은 3.0 s 지속 → 0.5 s 에 착륙 명령이 나갔을 것.
+- **P3 추정기 불일치** (`_check_estimator_disagreement`, MAVSDK 모니터 안): 파이프 vs MAVSDK 상대 위치 수직 0.3 / 수평 0.5 m 초과가 0.5 s → 비상 착륙. 사고 때 offboard 1 s 뒤 0.58 m.
+- **P4 이륙 거부** (`takeoff`): 지상에서 파이프/MAVSDK 상대 위치가 원점에서 0.15 m 이상 → 이륙하지 않고 착륙·disarm. 사고 때 파이프 U −0.45.
+- 새 모듈 `s2flight/vio.py`(voxl-inspect-vio 파서·리더·이력·저널 조회), `sim.sim_vio_task`(SITL 은 품질 100 고정, `S2_SIM_VIO_FILE` 로 상실 주입),
+  `run_sim_drift.sh VIO_FAIL_AT=<s>`, `tools_onboard/vio_check.py`(P5 손 점검 스크립트: 정지 20 s 통계 + 저널 + PX4 quality → PASS/FAIL).
+- CLI: `--no-vio-gate`(권장 안 함) 외 임계값 전부 옵션(`--vio-min-quality` 등). 배너에 `VIO gate` 줄. sync.csv 에 `vio_quality/vio_features/vio_state/est_dv/est_dh` 열.
+- 테스트: 파서·이력 5 + 통합 9(게이트 PASS/품질/특징점/정지 드리프트 거부, 비행 중 상실·불일치 비상 착륙, 이륙 거부, --no-vio-gate) → (결과는 §2 v0.2.0).
+- 절차(P5/P6): §4 치트시트에 실기 순서 추가 — mavsdk_server 기동 → `vio_check.py` 정지 PASS → 들어 움직인 뒤 다시 PASS → 비행. 실내 점검 비행은 `--altitude 0.4 --takeoff-speed 0.15`.
+  조종자 개입은 Position 모드 전환 후 하강, 킬은 최후.
+- 기체 배포: v0.2.0(`s2flight/` 16 파일 + `marker_drift_flight.py`) + `vio_check.py` 배포 완료, 온보드 0.2.0 확인. 비행 없음.
+- **기체 현재 위치에서 `vio_check.py --seconds 8` 실행 → FAIL**: quality 최소 17 / 평균 71, features 6, 정지 드리프트 1 cm, 저널 리셋 0, PX4 quality 96.
+  정지 상태에서도 품질이 17 까지 떨어지는 위치(충돌 후 책상 근처, 시야 특징점 부족 추정) — 게이트가 거부할 상태. 이륙 지점은 시야에 텍스처가 있는 곳으로.
+
 ### (다음 항목을 여기에 날짜로 추가)
-- [ ] 기체: `tag_locations.conf` 0.20, `skip_n_frames`, voxl-tag-detector 기동 (승인 후)
-- [ ] 손 검출 시험: x_cam 부호(오른쪽 +)·yaw 오차 부호 확인, 30 s 정지 σ → `--align-tol`
-- [ ] `tools/deploy_pkg.sh` 배포 → 실기 `--no-align --stop-mode distance --distance 0.5` → 태그 모드
+- [x] 기체: `tag_locations.conf` 0.20, `skip_n_frames` 1, voxl-tag-detector 기동 (2026-11-10 승인·적용)
+- [x] 손 검출 시험 (2026-11-10): x 오른쪽 +, σ_yaw 0.19° → `--align-tol 1.0`
+- [ ] v0.2.0 배포(`tools/deploy_pkg.sh flight/tools_onboard/vio_check.py`) → 기체 외관 점검(프롭·암·렌즈) → §4a 절차 → 사용자 "시작" → 낮은 점검 비행 → 태그 모드
 - [ ] 실험장: 태그 0~9 부착 마무리(좌상단 꼭짓점 기준 500 mm, §4.1 표), 통로 B 폭(140 cm?), 상단열 C(같은 ID 0~9)
 - [ ] 태그 크기 20 cm 확인
 
 ---
 
 ## 2. 패치노트
+
+### v0.2.0 — 이륙 사고 대책: VIO 게이트·감시·추정기 불일치·이륙 거부 (2026-11-10 오후)
+
+**추가**
+- `s2flight/vio.py`: `parse_voxl_inspect_vio_line`, `vio_reader_task`(voxl-inspect-vio -n <pipe> 자식 프로세스), `VioHistory`(불량 지속·창 요약), `journal_recent_vio_events`.
+- `s2flight/vehicle.py`: `PreflightAbort`, `update_vio`, `preflight_vio_gate`(P1/P4 정지 드리프트), `_vio_monitor`(P2), `_check_estimator_disagreement`(P3), `takeoff` 거부(P4),
+  `offboard_active` 플래그, 요약에 `vio_gate/vio_samples/vio_bad_episodes`.
+- `s2flight/config.py`: `vio_gate`, `vio_pipe`, `vio_min_quality` 50, `vio_min_features` 3, `vio_gate_window_s` 3, `vio_quiet_s` 30, `vio_static_drift_m` 0.03,
+  `est_disagree_v_m` 0.3, `est_disagree_h_m` 0.5, `est_disagree_s` 0.5, `vio_inflight_min_quality` 1, `vio_bad_abort_s` 0.5, `vio_stale_abort_s` 1.0,
+  `feedback_stale_abort_s` 1.0, `takeoff_fb_max_offset_m` 0.15 + CLI 그룹.
+- `s2flight/sim.py` `sim_vio_task`; `sim/run_sim_drift.sh` `VIO_FAIL_AT/VIO_FAIL_JSON/VIO_RECOVER_AFTER`; `summarize_run.py` safety 줄.
+- `flight/tools_onboard/vio_check.py`; `marker_drift_flight.py` PreflightAbort 처리(exit 3)·배너.
+
+**검증**: 단위테스트 **166/166** (신규 14: 파서 3·이력 2·게이트 PASS/품질/특징점/정지 드리프트 거부·비행 중 상실·불일치·이륙 거부·--no-vio-gate).
+
+| SITL | 인스턴스 | 시나리오 | 결과 |
+|---|---|---|---|
+| A7 | i2 (`20261110_215801_i2`) | 정상 | 게이트 PASS(quality 100, features 50, 드리프트 3 mm) → 왕복 STOPPED → 착륙, completed. VIO 샘플 722, 불량 0 |
+| V2 | i3 (`20261110_215940_i3`) | offboard +20 s(hover_ref, 0.6 m)에 VIO 상실 주입 | 0.1 s 뒤 `[vio] BAD` → **0.5 s 뒤 EMERGENCY LAND** → 3 s 뒤 착륙(gt z 0.03). abort_reason 'VIO LOST' |
+| G1 | i4 (`20261110_215831_i4`) | 시작부터 VIO 상실 | 게이트 FAIL(quality −1, not_ok 34/34) → **PREFLIGHT ABORT, arm 없음**, exit 3 |
+| V1 | i3 (`20261110_215816_i3`) | (주입 타이밍 실수: 게이트 창에 상실) | 게이트가 잡아 arm 안 함 — 게이트 창 중 상실도 거부됨을 확인 |
+
+사고 당시 조건을 대입하면: arm 전 저널 리셋 2회(①) + features 0(②) + 3 s 0.45 m 드리프트(③) 로 게이트 거부. 설령 통과했더라도 이륙 1.3 s 뒤 quality −1 → 0.5 s 뒤 착륙 명령,
+파이프 vs EKF 0.58 m 불일치로도 0.5 s 뒤 착륙. 추정기 자체의 추측항법 오차는 비행 코드가 고칠 수 없으므로 '빨리 내려앉기' 가 대책의 전부다.
+
+### v0.1.6 — 기체 ASCII 로케일 대응 (2026-11-10 밤, 실기 첫 실행에서 발견)
+
+**수정**
+- `s2flight/util.py` `force_utf8_stdio()`: stdout/stderr 가 UTF-8 이 아니면 UTF-8(errors=replace) 로 감싼다. `marker_drift_flight.py main()` 첫 줄에서 호출.
+- `s2flight/recorder.py` CSV 열기에 `encoding="utf-8"` (한글 이벤트 문자열 저장 시 충돌 방지).
+- `s2flight/__init__.py` `__version__` 0.1.6 (그동안 0.1.0 으로 방치됨).
+- 테스트 2항목(ASCII stdout 감싸기, UTF-8 에서 no-op).
 
 ### v0.1.5 — 통로 구간 지표 (2026-11-10 밤)
 
@@ -240,6 +349,12 @@
 - 조치: v0.1.3 재시도 3회(0.5 s 간격). 실행 중 재발하면 콘솔의 `Offboard start rejected (...) retry k/3` 로 보인다. 재시도도 소진되면 비상정지.
   재실행 결과(instance 2) 는 재시도 없이 통과.
 
+**실기 첫 실행: `UnicodeEncodeError: 'ascii' codec can't encode character '\u2014'` 로 배너 출력에서 중단 (2026-11-10, arm 전)**
+- 증상: `ssh starling2_lab "python3 marker_drift_flight.py ..."` 직후 Traceback. 모터 안 돌았음.
+- 원인: 비대화형 ssh 셀은 LANG 이 비어 기체 python3 의 stdout 이 ASCII (`locale` LC_CTYPE=POSIX). 콘솔·로그의 '—'·한글이 모두 예외.
+  SITL 컨테이너는 UTF-8 이라 드러나지 않았다. 비행 중 log() 에서 터졌다면 예외 → 비상정지 경로였을 것.
+- 조치: v0.1.6 `force_utf8_stdio()` + CSV utf-8. 실행 명령에도 `PYTHONIOENCODING=utf-8` 을 같이 준다(이중 안전).
+
 ### 비행 로직에서 확인된 동작 (버그 아님, 알아 둘 것)
 
 **큰 등속 드리프트(2 cm/s) 에서 센터링 3회 미수렴**
@@ -263,7 +378,25 @@
 
 ---
 
-## 4. 서버 실행 치트시트 (이 PC 에서)
+## 4. 치트시트
+
+### 4a. 실기 비행 절차 (2026-11-10 사고 뒤 확정; 순서를 건너뛰지 않는다)
+
+```bash
+ssh starling2_lab                                              # IP 바뀌면 메모리 절차로 스윕 (hostkey IIh6B2Siw…)
+pgrep -af mavsdk_server || (/home/mavsdk_server -p 50051 udp://:14551 &)   # 재부팅마다 수동. 없으면 비행 코드가 Connecting 에서 멈춘다
+systemctl is-active voxl-tag-detector || systemctl start voxl-tag-detector  # 태그 모드일 때만. conf: id 0~10 size 0.20, skip 1, down 끔
+cd /home/root && PYTHONIOENCODING=utf-8 python3 vio_check.py --seconds 20   # ① 바닥에 둔 채 PASS 필요
+#   → 기체를 손으로 천천히 들어 30 cm 움직였다 제자리에 둔다
+cd /home/root && PYTHONIOENCODING=utf-8 python3 vio_check.py --seconds 20   # ② 다시 PASS (복귀 확인). FAIL 이면 30~60 s 뒤 재시도
+#   조종기: 위(Offboard). 이상하면 가운데(Position) 로 내리고 스틱으로 하강. 킬은 최후.
+PYTHONIOENCODING=utf-8 python3 marker_drift_flight.py --no-align --stop-mode distance --distance 0.5 \\
+    --altitude 0.4 --takeoff-speed 0.15 --hover-ref 3 --hover-far 2 --hover-return 2 --condition T -y   # 실내 점검 비행 (낮게·느리게)
+#   비행 코드가 arm 직전 VIO 게이트를 다시 본다. 'vio-gate FAIL' 이면 arm 하지 않고 exit 3.
+```
+이륙 지점: 전방 카메라 시야에 텍스처(가구·마커·벽 무늬)가 있어야 한다. 흰 벽·현수막만 보이면 특징점 0 → 게이트 FAIL.
+
+### 4b. 서버 실행 (이 PC 에서)
 
 ```bash
 ssh dronesim_tailscale                                   # 키 로그인
@@ -274,5 +407,6 @@ scp -r dronesim_tailscale:~/starling_sim/marker_drift/logs/<시각>_i2 C:/Users/
 ssh -f -N -L 5901:localhost:5901 dronesim_tailscale      # 화면 보기 (RealVNC Viewer → localhost:5901)
 ssh dronesim_tailscale 'docker exec -d -e DISPLAY=:1 -e QT_X11_NO_MITSHM=1 -e GZ_PARTITION=starling_2 starling-gz gz sim -g'  # 실행 중 인스턴스 2 에 Gazebo GUI 붙이기
 ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && python3 sim/pilot_stats.py logs/20261110_19*_i*'   # 여러 비행 통계 (조건별 s, n)
+ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && VIO_FAIL_AT=25 INSTANCE=3 sim/run_sim_drift.sh --condition V --run 1'   # 비행 중 VIO 상실 → 비상 착륙 검증
 ```
 인스턴스 2·3 병렬 가능(각 ~3.5 분). 끝난 뒤 `pgrep -af "px4|gz sim"` 가 비어 있어야 정리된 것. 서버의 `~/Drone_project` 클론은 뒤처져 있으니 건드리지 않는다.

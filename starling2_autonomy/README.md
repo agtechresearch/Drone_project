@@ -25,6 +25,7 @@ ModalAI **Starling 2**(온보드 VOXL2) 드론에 **장애물 회피 · 안전�
 |---|---|
 | 경로 비행 (지그재그 커버리지) | 동작 — `flight/path_flight_phase1_v14.py` |
 | 지오펜스 (위치 폭주 방어) | **v14에서 복구 완료.** 단위테스트 25/25, 기체 배포 완료, **실비행 미검증** |
+| VIO 끊김 방어 (s2flight) | **2026-11-10 이륙 사고 뒤 v0.2.0**: arm 전 VIO 게이트, 비행 중 VIO 품질·파이프 vs EKF 불일치 감시 → 비상 착륙. SITL 검증, **실비행 미검증** (`docs/12` 사고 기록) |
 | 장애물 회피 — 데이터 입력 | **`voa_pc_out` 파서 완료.** 단위테스트 60/60, **기체 실측 미검증** |
 | 장애물 회피 — 정책 | 미착수. 선행조건인 **운용 환경(온실/실내/실외) 확인이 미해결** |
 | 매핑 | 미도입 (`voxl-mapper` 는 beta + 제어권 충돌 위험으로 보류) |
@@ -80,7 +81,7 @@ python analysis/test_geofence_v14.py       # 지오펜스 25항목
 python analysis/test_mpa_point_cloud.py    # voa_pc_out 파서 60항목
 python analysis/test_mpa_tag_detections.py # tag_detections 파서 49항목
 python analysis/test_tag_align.py          # 태그 정렬(yaw 폐루프) 74항목
-python analysis/test_s2flight.py           # s2flight 실험 비행 패키지 148항목 (가짜 기체로 드리프트 시퀀스 전체 + SITL 모드)
+python analysis/test_s2flight.py           # s2flight 실험 비행 패키지 166항목 (가짜 기체로 드리프트 시퀀스 전체 + SITL 모드)
 
 # 마커 드리프트 후처리(docs/09)는 numpy·opencv·pupil-apriltags 등이 필요하므로 venv 에서 돈다
 python -m venv .venv && .venv/Scripts/python -m pip install numpy opencv-python pupil-apriltags pandas matplotlib scipy pyyaml

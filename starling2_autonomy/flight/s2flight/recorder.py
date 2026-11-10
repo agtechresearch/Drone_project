@@ -165,7 +165,7 @@ class FlightRecorder(object):
                 if k not in seen:
                     seen.add(k)
                     fieldnames.append(k)
-        with open(path, "w", newline="") as f:
+        with open(path, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fieldnames)
             w.writeheader()
             for r in rows:

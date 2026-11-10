@@ -258,3 +258,33 @@ def encode_tag_datagram(t_s, detections):
     dets = [{"id": d.id, "t_cam": list(d.t_cam), "R": [list(r) for r in d.r_cam], "margin": 60.0, "hamming": 0}
             for d in detections]
     return json.dumps({"t": t_s, "dets": dets}).encode("utf-8")
+
+
+async def sim_vio_task(vehicle, is_running, period_s=0.1, status_file=None):
+    """vio.vio_reader_task 의 SITL 대체: 기본 quality 100 / OKAY / features 50 을 넣는다.
+
+    status_file (기본 환경변수 S2_SIM_VIO_FILE) 에 JSON {"quality": -1, "state": "FAILED", "features": 0} 을 써 두면
+    0.5 s 안에 그 값으로 바뀐다 → 비행 중 VIO 상실 시나리오를 SITL 에서 검증할 수 있다 (run_sim_drift.sh VIO_FAIL_AT).
+    """
+    import json
+    import os
+    path = os.environ.get("S2_SIM_VIO_FILE", "") if status_file is None else status_file
+    log("[sim] VIO status source: constant OK{}".format(" (override file {})".format(path) if path else ""))
+    override = {}
+    last_read = -1.0
+    while is_running():
+        now = mono_time()
+        if path and now - last_read >= 0.5:
+            last_read = now
+            try:
+                with open(path) as f:
+                    txt = f.read().strip()
+                override = json.loads(txt) if txt else {}
+            except (OSError, ValueError):
+                override = {}
+        parsed = {"quality": 100, "features": 50, "state": "OKAY", "error_codes": "", "pos": None, "raw": "sim"}
+        parsed.update(override)
+        parsed["mono_time"] = now
+        parsed["wallclock"] = wallclock()
+        vehicle.update_vio(parsed)
+        await asyncio.sleep(period_s)
