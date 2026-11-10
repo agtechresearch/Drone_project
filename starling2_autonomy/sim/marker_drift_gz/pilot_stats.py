@@ -12,6 +12,8 @@
     back   = legs_settled[back_settled].drift_along  (복귀 후 루프 폐합 드리프트)
     loop   = out − back                               (왕복 누적)
     standoff = out_settled.drift_standoff
+    seg_out / seg_back = drift_log.csv 에서 진행 구간 [--seg-from, --seg-to] 태그 사이의 err_along 증가분
+               (기본 2→6: 통로 조건 B 의 후방 장애물이 마커 2~6 구간에만 있으므로, 2026-11-10). 구간 밖은 A 와 같은 환경.
 n ≈ 16·(s/Δ)²  (두 표본 t 검정, α 0.05, 검정력 0.8 근사). s 는 조건 안 비행 간 표본표준편차.
 시뮬 결과의 s 는 VIO 가 아니라 코드·제어기 재현성("바닥 잡음")이므로 실기 n 산정에는 쓰지 않는다 (docs/12 2026-11-10).
 """
@@ -21,6 +23,35 @@ import json
 import math
 import os
 import sys
+
+
+def load_drift_log(folder):
+    """*_drift_log.csv → [(leg, truth_along, err_along)] (err 가 있는 행만)."""
+    import csv
+    fs = sorted(glob.glob(os.path.join(folder, "*_drift_log.csv")))
+    rows = []
+    if not fs:
+        return rows
+    with open(fs[-1], encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            try:
+                rows.append((r.get("leg", ""), float(r["truth_along"]), float(r["err_along"])))
+            except (ValueError, KeyError, TypeError):
+                continue
+    return rows
+
+
+def segment_drift(rows, leg, from_m, to_m, window_m=0.25):
+    """leg 구간에서 truth_along 이 from_m / to_m 주변(±window_m)인 프레임들의 err_along 평균 차 (to − from). 프레임이 없으면 None."""
+    pts = [(t, e) for (l, t, e) in rows if l == leg]
+    if len(pts) < 2:
+        return None
+    # 이동 중 단일 프레임은 피드백 지연 잡음(±2 cm)이 커서, 각 지점 ±window 안 프레임의 err 평균을 쓴다
+    wa = [e for (t, e) in pts if abs(t - from_m) <= window_m]
+    wb = [e for (t, e) in pts if abs(t - to_m) <= window_m]
+    if not wa or not wb:
+        return None
+    return sum(wb) / len(wb) - sum(wa) / len(wa)
 
 
 def load_run(folder):
@@ -53,10 +84,18 @@ def load_run(folder):
         "back": back.get("drift_along"),
         "standoff": out.get("drift_standoff"),
         "inject": inj,
+        "spacing": float(p.get("tag_spacing", 0.5) or 0.5),
+        "drift_rows": load_drift_log(folder),
     }
 
 
+SEG = {"from": 2, "to": 6}     # main() 에서 --seg-from/--seg-to 로 덮어쓴다
+
+
 def metric_value(r, metric):
+    if metric in ("seg_out", "seg_back"):
+        a, b = SEG["from"] * r["spacing"], SEG["to"] * r["spacing"]
+        return segment_drift(r["drift_rows"], "out" if metric == "seg_out" else "back", a, b)
     if metric == "out":
         return r["out"]
     if metric == "back":
@@ -102,10 +141,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("folders", nargs="+")
     ap.add_argument("--delta", type=float, default=0.03, help="검출하려는 최소 차이 Δ m (잠정 3 cm)")
-    ap.add_argument("--metric", default="out", choices=["out", "back", "loop", "standoff"])
+    ap.add_argument("--metric", default="out", choices=["out", "back", "loop", "standoff", "seg_out", "seg_back"])
+    ap.add_argument("--seg-from", type=int, default=2, help="seg_* 구간 시작 태그 (기본 2: 통로 B 장애물 시작)")
+    ap.add_argument("--seg-to", type=int, default=6, help="seg_* 구간 끝 태그 (기본 6)")
     ap.add_argument("--csv", default="", help="비행별 표를 이 CSV 로 저장")
     ap.add_argument("--include-failed", action="store_true", help="completed 가 아닌 비행도 통계에 넣는다")
     a = ap.parse_args()
+    SEG["from"], SEG["to"] = a.seg_from, a.seg_to
 
     folders = []
     for pat in a.folders:
@@ -122,15 +164,16 @@ def main():
         raise SystemExit("읽은 비행이 없다")
     runs.sort(key=lambda r: (r["condition"], r["run"] if r["run"] is not None else 0, r["folder"]))
 
-    print("비행별 ({}):".format(a.metric))
-    print("  {:<22} {:>4} {:>3} {:>5} {:>9} {:>7}  {:>7} {:>7} {:>7} {:>7}  inject".format(
-        "folder", "cond", "run", "alt", "completed", "align", "out", "back", "loop", "stoff"))
+    print("비행별 ({}; seg = 태그 {}→{} 구간 err_along 증가분):".format(a.metric, a.seg_from, a.seg_to))
+    print("  {:<22} {:>4} {:>3} {:>5} {:>9} {:>7}  {:>7} {:>7} {:>7} {:>7} {:>7} {:>7}  inject".format(
+        "folder", "cond", "run", "alt", "completed", "align", "out", "back", "loop", "stoff", "seg_out", "seg_bk"))
     for r in runs:
-        print("  {:<22} {:>4} {:>3} {:>5} {:>9} {:>7}  {} {} {} {}  {}".format(
+        print("  {:<22} {:>4} {:>3} {:>5} {:>9} {:>7}  {} {} {} {} {} {}  {}".format(
             r["folder"], r["condition"], r["run"] if r["run"] is not None else "-",
             "{:.1f}".format(r["altitude"]) if r["altitude"] is not None else "-",
             "yes" if r["completed"] else ("LAND" if r["landed_in_place"] else "NO"),
             r["align"] or "-", fmt(r["out"]), fmt(r["back"]), fmt(metric_value(r, "loop")), fmt(r["standoff"]),
+            fmt(metric_value(r, "seg_out")), fmt(metric_value(r, "seg_back")),
             json.dumps(r["inject"], ensure_ascii=False) if r["inject"] else ""))
 
     by = {}
@@ -166,10 +209,11 @@ def main():
         with open(a.csv, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["folder", "condition", "run", "altitude", "completed", "landed_in_place", "align",
-                        "drift_out", "drift_back", "drift_loop", "drift_standoff", "inject"])
+                        "drift_out", "drift_back", "drift_loop", "drift_standoff", "seg_out", "seg_back", "inject"])
             for r in runs:
                 w.writerow([r["folder"], r["condition"], r["run"], r["altitude"], r["completed"], r["landed_in_place"],
                             r["align"], r["out"], r["back"], metric_value(r, "loop"), r["standoff"],
+                            metric_value(r, "seg_out"), metric_value(r, "seg_back"),
                             json.dumps(r["inject"], ensure_ascii=False)])
         print("CSV 저장: {}".format(a.csv))
 
