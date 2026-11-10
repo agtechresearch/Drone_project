@@ -99,14 +99,15 @@ def build(args):
               "spawn_pose": "0,0,0.035,0,0,1.5708", "flight": "takeoff -> turn -90 (face -x) -> right = +y",
               "tags": {}}
     links = ""
-    for row_ids, z in rows:
+    for ri, (row_ids, z) in enumerate(rows):
         for k, tid in enumerate(row_ids):
             y = k * args.spacing
             fn = "tag_{:02d}.png".format(tid)
             src = make_texture(tid, args.tags_dir, args.textures_dir, os.path.join(tdir, fn))
-            layout["tags"][str(tid)] = {"x": round(x_plane, 4), "y": round(y, 4), "z": round(z, 4), "size": args.size,
-                                        "texture": src}
-            links += """    <link name="tag_{tid:02d}">
+            key = str(tid) if ri == 0 else "{}_r{}".format(tid, ri)      # 상단열이 같은 ID 를 쓰면 키 충돌 방지
+            layout["tags"][key] = {"id": tid, "row": ri, "x": round(x_plane, 4), "y": round(y, 4), "z": round(z, 4),
+                                   "size": args.size, "texture": src}
+            links += """    <link name="tag_{tid:02d}_r{ri}">
       <pose>{cx:.4f} {y:.4f} {z:.4f} 0 0 0</pose>
       <visual name="v">
         <geometry><box><size>0.002 {p:.4f} {p:.4f}</size></box></geometry>
@@ -116,7 +117,7 @@ def build(args):
         <cast_shadows>false</cast_shadows>
       </visual>
     </link>
-""".format(tid=tid, cx=tag_cx, y=y, z=z, p=print_size, name=name, fn=fn)
+""".format(tid=tid, ri=ri, cx=tag_cx, y=y, z=z, p=print_size, name=name, fn=fn)
 
     banner_rows = ""
     for row_ids, z in rows:
@@ -189,7 +190,7 @@ def main():
     p.add_argument("--spacing", type=float, default=0.5, help="태그 간격 m")
     p.add_argument("--z", type=float, default=0.60, help="하단열 태그 중심 높이 m (조건 A/B 고도)")
     p.add_argument("--upper", action="store_true", help="상단열(조건 C)도 만든다")
-    p.add_argument("--upper-ids", default="20-30")
+    p.add_argument("--upper-ids", default="0-10", help="상단열 ID. 2026-11-10 실험장: 하단열과 같은 0~10 (높이로만 구분)")
     p.add_argument("--upper-z", type=float, default=2.00)
     p.add_argument("--banner-h", type=float, default=0.50, help="현수막 높이 m (실물 50 cm)")
     p.add_argument("--banner-margin", type=float, default=0.25, help="양 끝 태그 바깥 여유 m")

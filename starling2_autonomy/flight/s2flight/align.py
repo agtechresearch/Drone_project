@@ -28,6 +28,9 @@ ROW_ID_RANGES = ((0, 20), (20, 40))     # 하단열 0~11(여유 ~19), 상단열 
 TAG_SPACING_M = 0.5
 LINE_RMS_MAX_M = 0.03
 DEFAULT_MAX_RANGE_M = 3.0
+# 2026-11-10: 상단열도 ID 0~10 (z 2.0 m). 다른 열은 이격 0.7 m 에서 |y_cam| ≈ 1.4 m (이격 1 m 이상이면 화각에 들어옴),
+# 자기 열은 |y_cam| < ~0.3 m → |y| > 0.7 m 은 버린다.
+DEFAULT_MAX_VERTICAL_M = 0.7
 
 
 def row_of(tag_id):
@@ -131,7 +134,8 @@ def _as_tag(obj):
 
 
 def measure_alignment(detections, min_tags=2, allowed_ids=None,
-                      max_range_m=DEFAULT_MAX_RANGE_M, line_rms_max_m=LINE_RMS_MAX_M):
+                      max_range_m=DEFAULT_MAX_RANGE_M, line_rms_max_m=LINE_RMS_MAX_M,
+                      max_vertical_m=DEFAULT_MAX_VERTICAL_M):
     """한 프레임의 검출 목록에서 yaw 오차를 잰다 (규칙은 tag_align.py 와 동일)."""
     m = AlignMeasurement()
     tags = []
@@ -148,6 +152,8 @@ def measure_alignment(detections, min_tags=2, allowed_ids=None,
             continue
         x, y, z = t_cam
         if z <= 0.0 or math.sqrt(x * x + y * y + z * z) > max_range_m:
+            continue
+        if max_vertical_m is not None and abs(y) > max_vertical_m:   # 같은 ID 의 다른 높이 열 배제 (2026-11-10)
             continue
         tags.append((tag_id, row, (x, y, z), r_cam))
 

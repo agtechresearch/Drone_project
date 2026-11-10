@@ -4,7 +4,7 @@
 설계서 `docs/09_marker_drift_experiment_plan.md` 와 랩미팅 요약 `_brief.md` 는 "무엇을 할 것인가", 이 문서는 "실제로 무엇이 일어났는가".
 새 항목은 **§1 진행 기록** 끝에 날짜로 추가하고, 코드가 바뀌면 §2 패치노트, 문제를 겪으면 §3 트러블슈팅에도 한 줄씩 남긴다.
 
-**현재 상태 (2026-11-10):** 코드 완성 · 서버 SITL 선검증 통과(정상 2 + 오류 주입 6) · 실기 비행 전 단계.
+**현재 상태 (2026-11-10 저녁):** 코드 완성 · 서버 SITL 선검증 통과(정상 2 + 오류 주입 6 + 2열 동일 ID 2) · 마커 설치 중 · 실기 비행 전 단계.
 남은 관문: 기체 태그 검출기 설정(승인) → 손 검출 부호 확인 → 짧은 호버 비행 → 본실험.
 
 ---
@@ -33,16 +33,44 @@
 - 추가 도구: `INJECT` 환경변수, `summarize_run.py`. 로그 사본 `C:\Users\ericj\sim_logs\marker_drift\`.
 - 결정: 앞으로 실험 진행 과정은 **이 문서 하나**에 기록.
 
+### 2026-11-10 (저녁) — 실험장 변경: 상단열도 ID 0~10, 설치 기준점 좌상단 꼭짓점
+- 사용자: 마커는 **좌상단 꼭짓점 기준**으로 붙임. 상단열도 **ID 0~10** (당초 20~30 폐기). 20 cm 태그 배치 재검토 요청.
+- 배치 결론: 중심 간격 0.5 m 유지(검은 사각형 사이 30 cm, 인쇄지 사이 25 cm). 좌상단 꼭짓점 X = 500·k mm(태그 0 기준), Z = 700 mm(하단)·2100 mm(상단),
+  인쇄지 기준이면 Z +25. 현수막 바닥 350~850 mm. 비행 코드는 ID × 0.5 m 만 쓰므로 꼭짓점 간격·한 평면·수직이 정밀도의 전부. docs/09 §4.1 갱신.
+- 같은 ID 두 열 → 비행 코드 영향 검토: 핀홀 보정(undistort_scale 0.6, fx≈277) 프레임에서 다른 열(1.4 m 위/아래)은 이격 0.7 m 에선 화각 밖이지만
+  **이격 ≥ 1.0 m(센터링 전·정렬 중)면 들어온다**. `per_tag` 가 ID 키라 같은 ID 두 검출이 섞이면 센터링·정지 판정이 흔들릴 수 있음 →
+  **상하 |y_cam| > 0.7 m 검출 배제** 필터 추가 (`--align-max-vertical`, v0.1.2). 단위테스트 144/144.
+- 후처리 배치 파일은 ID 키라 열별로 분리: `lab_default.yaml`(하단) + `lab_upper.yaml`(상단).
+- SITL 2열 월드(`make_banner_world.py --upper`, 상단열 ID 0~10) 재설치 후 A(0.6 m)·C(2.0 m) 각 1회: 결과 §2 v0.1.2 표.
+
 ### (다음 항목을 여기에 날짜로 추가)
 - [ ] 기체: `tag_locations.conf` 0.20, `skip_n_frames`, voxl-tag-detector 기동 (승인 후)
 - [ ] 손 검출 시험: x_cam 부호(오른쪽 +)·yaw 오차 부호 확인, 30 s 정지 σ → `--align-tol`
 - [ ] `tools/deploy_pkg.sh` 배포 → 실기 `--no-align --stop-mode distance --distance 0.5` → 태그 모드
-- [ ] 실험장: 태그 0~10 제작, 통로 B 폭(140 cm?), 상단열 C
+- [ ] 실험장: 태그 0~10 제작·부착(좌상단 꼭짓점 기준, §4.1 표), 통로 B 폭(140 cm?), 상단열 C(같은 ID 0~10)
 - [ ] 태그 크기 20 cm 확인
 
 ---
 
 ## 2. 패치노트
+
+### v0.1.2 — 2열 동일 ID 대응 (2026-11-10 저녁)
+
+**추가**
+- `s2flight/align.py` `DEFAULT_MAX_VERTICAL_M = 0.7`, `measure_alignment(..., max_vertical_m)`: 카메라 기준 상하 |y| 가 이보다 큰 검출 배제.
+  `s2flight/drift.py` `estimate_frame`/`DriftMonitor`, `align_stage.AlignParams` 에 같은 인자. CLI `--align-max-vertical`(기본 0.7, 음수면 끔).
+- `sim/make_banner_world.py`: `--upper-ids` 기본 `0-10`, 링크 이름 `tag_NN_rR`, layout 키 `NN_r1` 로 같은 ID 두 열 생성 가능.
+- `analysis/marker_drift/layouts/lab_upper.yaml` 신설(상단열 ID 0~10, z 2.0). `lab_default.yaml` 은 하단열만.
+- 테스트 5항목 추가(다른 열만 → no_tags, 혼합 → 자기 열만, 끄기, estimate_frame 2건) → 144/144.
+
+**문서**: docs/09 §4.1(상단열 ID·설치 기준점 표), brief, sim README, `marker_drift_flight.py` 도움말(상단열 20/30 문구 제거).
+
+**SITL 검증 (2열 월드, 상단열 ID 0~10)**
+
+| 회차 | 인스턴스 | 조건 | 결과 |
+|---|---|---|---|
+| A3 | i2 (`20261110_192012_i2`) | 0.6 m, 하단열 | completed. ALIGNED 0.08°, center ok, out/back STOPPED(태그 10/0), settled drift_along −0.002 / +0.034 m. 원시 검출 1227 중 상단열(|y| 1.40) 6건 → 필터로 배제, 판정 영향 없음 |
+| C1 | i3 (`20261110_192032_i3`) | 2.0 m, 상단열 | completed. ALIGNED 0.04°, center ok, out/back STOPPED, settled drift_along −0.009 / −0.001 m. 원시 검출 1419 중 하단열(|y| 최대 1.48, 이착륙 중 0.98) 43건 → 배제. `--start/end-tag` 기본값 그대로 |
 
 ### v0.1.1 — 서버 첫 실행 (2026-11-10)
 

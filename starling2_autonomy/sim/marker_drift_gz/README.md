@@ -46,7 +46,7 @@ SIM_HOST=user@server ./sim/marker_drift_gz/sync_to_server.sh
 
 # 서버 호스트
 cd ~/starling_sim/marker_drift
-python3 sim/make_banner_world.py                 # cad venv (PIL). 태그 0~10 @ z 0.60, --upper 로 20~30 @ 2.0 추가
+python3 sim/make_banner_world.py --upper         # 태그 0~10 @ z 0.60 + 상단열(같은 ID 0~10) @ 2.0 (2026-11-10 실험장). --upper-ids 로 변경 가능
 docker exec starling-gz ~/starling_sim/marker_drift/sim/install_banner_world.sh   # PX4 gz 트리에 모델·월드 복사 (빌드 없음)
 
 # 1) 패키지 점검 비행: 이륙 → 좌회전 → 0.5 m 왕복 → 착륙 (태그 정렬 없음)
@@ -54,8 +54,8 @@ sim/run_sim_drift.sh --no-align --distance 0.5 --hover-ref 3 --hover-far 2 --hov
 
 # 2) 정렬 포함 본 시퀀스 (A 조건, 0.6 m, 5.0 m 왕복)
 sim/run_sim_drift.sh --condition A --run 1
-# 3) 조건 C (상단열 월드가 필요: make_banner_world.py --upper 후 재설치)
-sim/run_sim_drift.sh --altitude 2.0 --condition C --run 1 --start-tag 20 --end-tag 30
+# 3) 조건 C (상단열 월드: make_banner_world.py --upper 후 재설치). 상단열도 ID 0~10 이라 --start/end-tag 는 그대로
+sim/run_sim_drift.sh --altitude 2.0 --condition C --run 1
 ```
 
 `run_sim_drift.sh` 가 하는 일: 인스턴스 N(기본 2) 정지 → `run_wk_instance.sh N drift_banner headless 0,0,0.035,0,0,1.5708`
@@ -87,7 +87,8 @@ python3 sim/summarize_run.py logs/<시각>_iN                                   
 
 - 기체 스폰 (0, 0) 북향(gz yaw 1.5708; drone_sim_gz 규칙 — 다른 방향 스폰은 착지 시 yaw 점프를 만든다).
 - 현수막 평면 x = −0.70 (기체 왼쪽), 법선 +x. 태그 k 는 y = 0.5·k (0 → 0 m, 10 → 5.0 m), 중심 z 0.60. 검은 사각형 0.20 m, 인쇄 0.25 m.
-- 흰 판 5.5 × 0.5 m 가 태그 뒤 4 mm 에 있다 (`--banner-h`, `--banner-margin`). `--upper` 면 ID 20~30 이 z 2.00 에 같은 배치.
+- 흰 판 5.5 × 0.5 m 가 태그 뒤 4 mm 에 있다 (`--banner-h`, `--banner-margin`). `--upper` 면 **같은 ID 0~10** 이 z 2.00 에 같은 배치
+  (2026-11-10 실험장 변경; 링크 이름 `tag_NN_r1`, layout 키 `NN_r1`). 비행 코드는 |y_cam| > 0.7 m 검출을 버려 다른 열을 섞지 않는다.
 - 비행: 이륙 → 좌회전 90° (−x 를 봄 = 현수막 정면) → 정렬 → body 우측 = +y 로 5.0 m → 복귀. `banner_layout.json` 에 좌표가 남는다.
 
 ## 판정

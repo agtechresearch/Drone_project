@@ -85,7 +85,7 @@ class FrameEstimate(object):
         self.n_tags = 0
 
 
-def estimate_frame(frame, layout, max_range_m=al.DEFAULT_MAX_RANGE_M):
+def estimate_frame(frame, layout, max_range_m=al.DEFAULT_MAX_RANGE_M, max_vertical_m=al.DEFAULT_MAX_VERTICAL_M):
     """TagFrame → FrameEstimate (유효 태그 없으면 n_tags 0)."""
     est = FrameEstimate()
     est.timestamp_ns = frame.timestamp_ns
@@ -97,6 +97,8 @@ def estimate_frame(frame, layout, max_range_m=al.DEFAULT_MAX_RANGE_M):
         x, y, z = d.t_cam
         if z <= 0.0 or math.sqrt(x * x + y * y + z * z) > max_range_m:
             continue
+        if max_vertical_m is not None and abs(y) > max_vertical_m:   # 같은 ID 의 다른 높이 열 배제 (2026-11-10)
+            continue
         tags.append(d)
     est.n_tags = len(tags)
     if not tags:
@@ -104,7 +106,8 @@ def estimate_frame(frame, layout, max_range_m=al.DEFAULT_MAX_RANGE_M):
     tags.sort(key=lambda d: d.id)
     est.ids = [d.id for d in tags]
     if len(tags) >= 2:
-        m = al.measure_alignment(tags, min_tags=2, allowed_ids=layout.ids, max_range_m=max_range_m)
+        m = al.measure_alignment(tags, min_tags=2, allowed_ids=layout.ids, max_range_m=max_range_m,
+                                 max_vertical_m=max_vertical_m)
         if m.valid:
             est.psi_deg = m.yaw_error_deg
             est.psi_src = "line"
@@ -127,12 +130,13 @@ class DriftMonitor(TagFeed):
     """태그 피드를 소비하며 프레임마다 실제 위치·자기 추정·오차를 기록한다. 정지 판정용 최신 검출도 보관한다."""
 
     def __init__(self, vehicle, feed, layout, recorder=None, max_range_m=al.DEFAULT_MAX_RANGE_M, stale_s=0.4,
-                 table="drift_log"):
+                 table="drift_log", max_vertical_m=al.DEFAULT_MAX_VERTICAL_M):
         self.v = vehicle
         self.feed = feed
         self.layout = layout
         self.rec = recorder
         self.max_range_m = max_range_m
+        self.max_vertical_m = max_vertical_m
         self.stale_s = stale_s
         self.table = table
         self.latest = {}                    # tag id -> (x_cam, z_cam, dx, s, recv_time, frame_ns)
@@ -257,7 +261,7 @@ class DriftMonitor(TagFeed):
 
     def _process(self, frame, now):
         self.n_frames += 1
-        est = estimate_frame(frame, self.layout, self.max_range_m)
+        est = estimate_frame(frame, self.layout, self.max_range_m, self.max_vertical_m)
         if est.n_tags == 0:
             return
         self.last_est = est

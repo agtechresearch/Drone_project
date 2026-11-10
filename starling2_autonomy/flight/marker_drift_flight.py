@@ -19,7 +19,7 @@
 
 기체에서:
     python3 marker_drift_flight.py --altitude 0.6 --condition A --run 1
-    python3 marker_drift_flight.py --altitude 2.0 --condition C --run 1 --start-tag 20 --end-tag 30
+    python3 marker_drift_flight.py --altitude 2.0 --condition C --run 1      # 상단열도 ID 0~10 (2026-11-10), 높이로만 구분
     python3 marker_drift_flight.py --no-align --distance 0.5 --condition T    # 패키지 호버 점검 비행 (시뮬 통과 후)
 
 시뮬레이션(drone_sim_gz, gz Harmonic SITL — 실기 전에 여기서 먼저 돌린다; sim/marker_drift_gz/README.md):
@@ -115,7 +115,8 @@ async def run_sequence(v, params, feed=None, recorder=None):
     # legs: 정지 순간(이동 중 피드백 지연 포함) / legs_settled: 뒤따르는 호버가 끝난 정지 상태 — 드리프트 수치는 settled 를 본다
     mon = None
     if feed is not None:
-        mon = DriftMonitor(v, feed, layout, recorder=recorder, max_range_m=p.align.max_range_m, stale_s=p.tag_stale)
+        mon = DriftMonitor(v, feed, layout, recorder=recorder, max_range_m=p.align.max_range_m, stale_s=p.tag_stale,
+                           max_vertical_m=p.align.max_vertical_m)
     if p.stop_mode == "tag" and mon is None:
         raise RuntimeError("stop_mode=tag 인데 태그 피드가 없다 (--stop-mode distance 또는 검출기 기동)")
     v.event("sequence_start", "condition={} run={} stop_mode={} tags {}..{}".format(p.condition, p.run, p.stop_mode,
@@ -272,6 +273,9 @@ def build_arg_parser():
     a.add_argument("--align-yaw-speed", type=float, default=20.0)
     a.add_argument("--align-max-range", type=float, default=al.DEFAULT_MAX_RANGE_M,
                    help="이보다 먼 태그는 무시 m. tag_locations 크기가 0.4 로 남아 있으면 거리가 5.7배로 나와 걸러진다")
+    a.add_argument("--align-max-vertical", type=float, default=al.DEFAULT_MAX_VERTICAL_M,
+                   help="카메라 기준 상하 |y| 가 이보다 큰 태그는 무시 m. 상단열(2.0 m)과 하단열(0.6 m)이 같은 ID 0~10 을 쓰므로 "
+                        "다른 열(1.4 m 차이)을 배제한다 (2026-11-10). 음수면 끔")
     a.add_argument("--tag-size", type=float, default=0.20,
                    help="기대 태그 크기 m (2026-11-09 확정 0.20). tag_locations.conf 와 다르면 첫 프레임에 경고")
     a.add_argument("--tag-pipe", default="tag_detections")
@@ -281,8 +285,8 @@ def build_arg_parser():
     t = p.add_argument_group("정지 조건 / 드리프트 기록 (s2flight.drift)")
     t.add_argument("--stop-mode", choices=["tag", "distance"], default="tag",
                    help="tag: 끝 태그가 카메라 중앙에 오면 정지(기본, 도달 판정 없음) / distance: 자기 추정으로 --distance 만큼(옛 방식)")
-    t.add_argument("--start-tag", type=int, default=0, help="시작 태그 id (정렬·센터링·복귀 정지). 상단열이면 20")
-    t.add_argument("--end-tag", type=int, default=10, help="끝 태그 id (우측 이동 정지). 상단열이면 30")
+    t.add_argument("--start-tag", type=int, default=0, help="시작 태그 id (정렬·센터링·복귀 정지). 상단열도 0 (2026-11-10)")
+    t.add_argument("--end-tag", type=int, default=10, help="끝 태그 id (우측 이동 정지). 상단열도 10")
     t.add_argument("--tag-spacing", type=float, default=0.5, help="태그 간격 m → 실제 위치 환산")
     t.add_argument("--center-tol", type=float, default=0.05, help="'중앙' 판정 허용 m (센터링·정지 공통)")
     t.add_argument("--no-center", action="store_true", help="정렬 뒤 start 태그 센터링 생략")
@@ -308,6 +312,7 @@ def make_params(args):
     align = AlignParams(tol_deg=args.align_tol, hold_s=args.align_hold, timeout_s=args.align_timeout,
                         gain=args.align_gain, max_step_deg=args.align_max_step, settle_s=args.align_settle,
                         max_range_m=args.align_max_range, allowed_ids=allowed,
+                        max_vertical_m=(None if args.align_max_vertical < 0 else args.align_max_vertical),
                         yaw_speed_deg_s=args.align_yaw_speed, expected_tag_size_m=args.tag_size)
     return DriftParams(altitude=args.altitude, distance=args.distance, speed=args.speed,
                        turn_deg=args.turn_deg, turn_speed=args.turn_speed, post_turn_hover=args.post_turn_hover,

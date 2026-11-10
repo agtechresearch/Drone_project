@@ -20,7 +20,8 @@ from .util import log
 class AlignParams(object):
     def __init__(self, tol_deg=1.5, hold_s=1.0, timeout_s=15.0, gain=0.8, max_step_deg=15.0,
                  settle_s=0.4, min_tags=2, max_range_m=al.DEFAULT_MAX_RANGE_M, allowed_ids=None,
-                 yaw_speed_deg_s=20.0, period_s=0.05, expected_tag_size_m=0.20):
+                 yaw_speed_deg_s=20.0, period_s=0.05, expected_tag_size_m=0.20,
+                 max_vertical_m=al.DEFAULT_MAX_VERTICAL_M):
         self.tol_deg = tol_deg
         self.hold_s = hold_s
         self.timeout_s = timeout_s
@@ -29,6 +30,7 @@ class AlignParams(object):
         self.settle_s = settle_s
         self.min_tags = min_tags
         self.max_range_m = max_range_m
+        self.max_vertical_m = max_vertical_m
         self.allowed_ids = allowed_ids
         self.yaw_speed_deg_s = yaw_speed_deg_s
         self.period_s = period_s
@@ -92,7 +94,7 @@ async def run_alignment(vehicle, feed, params, recorder=None, controller=None, n
         for f in frames:
             res.n_frames += 1
             m = al.measure_alignment(f.tags, min_tags=params.min_tags, allowed_ids=params.allowed_ids,
-                                     max_range_m=params.max_range_m)
+                                     max_range_m=params.max_range_m, max_vertical_m=params.max_vertical_m)
             if m.recv_time is None:
                 m.recv_time = f.recv_time
             if m.timestamp_ns is None:

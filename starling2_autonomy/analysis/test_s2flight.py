@@ -424,6 +424,15 @@ m2 = al.measure_alignment(f.tags, max_range_m=0.3)
 ok("range filter", not m2.valid and m2.reason == "no_tags")
 m3 = al.measure_alignment(f.tags, allowed_ids={20, 21})
 ok("allowed_ids filter", not m3.valid)
+# 2026-11-10: 상단열도 ID 0~10 → 다른 높이(|y| 1.4 m)의 같은 ID 는 버린다
+_other_row = [tags.TagDetection(t.id, t.size_m, t.timestamp_ns, t.name, t.loc_type, (t.t_cam[0], 1.4, t.t_cam[2]), t.r_cam,
+                                t.t_fixed, t.r_fixed, t.cam) for t in f.tags]
+m4 = al.measure_alignment(_other_row)
+ok("vertical filter: other row (|y| 1.4) alone -> no_tags", not m4.valid and m4.reason == "no_tags", repr(m4))
+m5 = al.measure_alignment(list(f.tags) + _other_row)
+ok("vertical filter: mixed rows -> only own row counted", m5.valid and m5.n_tags == len(f.tags) and near(m5.yaw_error_deg, 10.0, 0.05), repr(m5))
+m6 = al.measure_alignment(_other_row, max_vertical_m=None)
+ok("vertical filter off (None) keeps other row", m6.valid, repr(m6))
 
 ctl = al.AlignController(tol_deg=1.0, hold_s=0.3, timeout_s=5.0, settle_s=0.0, min_hold_frames=2)
 ctl.start(0.0)
@@ -671,6 +680,12 @@ ok("estimate_frame: two tags -> line psi, truth along = along(3) - 0.30 = 1.20, 
 fr1 = tags.TagFrame(2, fr.tags[:1], 1.1)
 est1 = s2drift.estimate_frame(fr1, lay)
 ok("estimate_frame: single tag -> normal psi", est1.n_tags == 1 and est1.psi_src == "normal" and near(est1.truth_along, 1.20, 0.01))
+_fr_up = tags.TagFrame(4, [tags.TagDetection(d.id, d.size_m, 4, "", 0, (d.t_cam[0], -1.4, d.t_cam[2]), d.r_cam, d.t_fixed, d.r_fixed, d.cam)
+                           for d in fr.tags], 1.3)
+ok("estimate_frame: other row (|y| 1.4, same ids) ignored", s2drift.estimate_frame(_fr_up, lay).n_tags == 0)
+_fr_mix = tags.TagFrame(5, list(fr.tags) + list(_fr_up.tags), 1.4)
+_em = s2drift.estimate_frame(_fr_mix, lay)
+ok("estimate_frame: mixed rows -> own row only, same along", _em.n_tags == 2 and near(_em.truth_along, 1.20, 0.005), "{} {}".format(_em.n_tags, _em.truth_along))
 ok("estimate_frame ignores ids outside layout", s2drift.estimate_frame(tags.TagFrame(3, [tags.TagDetection(25, 0.2, 3, "", 0, (0, 0, 0.7), _rot_y_cols(0), (0, 0, 0), ((1, 0, 0), (0, 1, 0), (0, 0, 1)), "x")], 1.2), lay).n_tags == 0)
 
 print("\n[drift: tag-stop sequence with 10 % scale drift, start offset, missing end tag]")
