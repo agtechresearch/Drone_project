@@ -4,7 +4,7 @@
 설계서 `docs/09_marker_drift_experiment_plan.md` 와 랩미팅 요약 `_brief.md` 는 "무엇을 할 것인가", 이 문서는 "실제로 무엇이 일어났는가".
 새 항목은 **§1 진행 기록** 끝에 날짜로 추가하고, 코드가 바뀌면 §2 패치노트, 문제를 겪으면 §3 트러블슈팅에도 한 줄씩 남긴다.
 
-**현재 상태 (2026-11-10 저녁):** 코드 완성 · 서버 SITL 선검증 통과(정상 2 + 오류 주입 6 + 2열 동일 ID 2) · 마커 설치 중 · 실기 비행 전 단계.
+**현재 상태 (2026-11-10 밤):** 코드 완성 · 서버 SITL 선검증 통과(정상 3 + 오류 주입 6 + 2열 동일 ID 2 + 시뮬 파일럿 9/9) · 마커 설치 중 · 실기 비행 전 단계.
 남은 관문: 기체 태그 검출기 설정(승인) → 손 검출 부호 확인 → 짧은 호버 비행 → 본실험.
 
 ---
@@ -43,6 +43,28 @@
 - 후처리 배치 파일은 ID 키라 열별로 분리: `lab_default.yaml`(하단) + `lab_upper.yaml`(상단).
 - SITL 2열 월드(`make_banner_world.py --upper`, 상단열 ID 0~10) 재설치 후 A(0.6 m)·C(2.0 m) 각 1회: 결과 §2 v0.1.2 표.
 
+### 2026-11-10 (밤) — 시뮬 파일럿 리허설 A·B·C × 3, offboard 시작 재시도
+- 사용자 결정: 파일럿을 시뮬로 먼저 리허설. 의견 교환 결과 **시뮬 s 는 n 산정에 쓰지 않는다**(VIO 가 진실값 릴레이라 드리프트가 아니라 코드 재현성).
+  목적은 절차·분석 파이프라인 예행과 파라미터 확정. 실기 파일럿 3회/조건은 계획대로.
+- 실행: 인스턴스 2·3·4 병렬, 교대 순서 A B C → C B A → A B C (`pilot/batch.sh`). B 는 `--max-horizontal-dev 1.0`, C 는 `--altitude 2.0`(상단열 ID 0~10).
+  서버는 타 사용자 Gazebo 작업과 겹쳐 load 20~28/32 코어.
+- 결과 9/9 완료(A2 는 1차 실패 후 재실행). 통계 `sim/pilot_stats.py` → `pilot/pilot_sim_9.csv`(로컬 `C:\Users\ericj\sim_logs\marker_drift\`):
+
+  | 조건 | n | 최종 드리프트 E(out_settled) mean / s | 복귀 드리프트(back_settled) mean / s |
+  |---|---|---|---|
+  | A 0.6 m | 3 | −0.005 / 0.005 m | +0.004 / 0.007 m |
+  | B 0.6 m 통로 설정 | 3 | −0.007 / 0.006 m | +0.014 / 0.026 m (B2 +0.043 이상치) |
+  | C 2.0 m 상단열 | 3 | −0.008 / 0.005 m | −0.003 / 0.004 m |
+
+  조건 간 차이 |t| < 1 (당연: 시뮬은 조건이 같다). **코드 바닥 잡음 s ≈ 0.5 cm** → 실기 s 가 이보다 크면 그 초과분이 VIO 드리프트.
+  Δ 3 cm 기준 n_req 2 는 시뮬 수치일 뿐 실기에 적용하지 않는다.
+- 실패 1건: A2 1차(인스턴스 4) arm 직후 `Offboard FAILED: NO_SETPOINT_SET` → 비상정지(착륙·disarm, 안전 동작은 정상). 과부하로 setpoint 스트림이
+  PX4 기준 시간 안에 안 닿은 것으로 판단. v14 와 같은 로직(3 s priming → arm → 1 s → start, 재시도 없음)이라 **재시도 3회** 추가(v0.1.3, §3).
+- 관찰: B2 복귀 settled 드리프트 +0.043 m 는 정지 순간 dx +0.065 오버슈트 뒤 태그 0·1·2 기반 truth 추정과 자기 추정의 차. 시뮬 VIO 가 진실값이므로
+  태그 추정 쪽 오차(가장자리 태그·2 cm 급)로 보인다. 실기에서 같은 크기가 반복되면 `center_tol`·hover_return 길이 재검토.
+- VNC: Gazebo GUI 를 실행 중 인스턴스에 붙여 보는 방법 확립(§4, sim README). 마우스 회전·줌·Follow 가능.
+- 서버 정리: dronesim 계정 고아 프로세스(Chrome 6, ugrep 4) 종료. 타 사용자 컨테이너·프로세스는 손대지 않음.
+
 ### (다음 항목을 여기에 날짜로 추가)
 - [ ] 기체: `tag_locations.conf` 0.20, `skip_n_frames`, voxl-tag-detector 기동 (승인 후)
 - [ ] 손 검출 시험: x_cam 부호(오른쪽 +)·yaw 오차 부호 확인, 30 s 정지 σ → `--align-tol`
@@ -53,6 +75,20 @@
 ---
 
 ## 2. 패치노트
+
+### v0.1.3 — offboard 시작 재시도, 파일럿 통계 (2026-11-10 밤)
+
+**추가**
+- `s2flight/config.py` `offboard_start_retries = 3`, `offboard_retry_sec = 0.5` (CLI `--offboard-start-retries`, `--offboard-retry-sec`).
+  `vehicle.start_monitors_and_offboard`: `offboard.start()` 가 `OffboardError` 로 거부되면 스트림을 유지한 채 재시도, 이벤트 `offboard_retry` 기록.
+  소진 시 기존과 같이 비상정지. `--offboard-start-retries 0` 이면 v14 동작.
+- `sim/marker_drift_gz/pilot_stats.py`: 여러 결과 폴더 → 비행별 표, 조건별 mean/s/n_req(16(s/Δ)²), Welch t, `--csv`. 표준 라이브러리.
+- 테스트 4항목(재시도 성공·이벤트·소진·0회) → 148/148.
+
+**수정**
+- `summarize_run.py`: `initial_yaw=None(None)` 표시 버그 (잘못된 키 경로) 수정.
+
+**SITL**: 파일럿 9회(§1 표) + A2 재실행 통과. 재시도 패치 적용 후 실행에서는 재시도가 발생하지 않았다(정상 경로 불변 확인).
 
 ### v0.1.2 — 2열 동일 ID 대응 (2026-11-10 저녁)
 
@@ -156,11 +192,18 @@
 
 **`summary.json` 에 `initial_yaw_deg: None`**
 - 원인: 요약 도구가 최상위 키로 읽는데 실제 값은 다른 위치(콘솔 `Heading ref` 줄에는 정상 출력). 도구 쪽 표시 문제.
-- 조치: 콘솔 로그/`events.csv` 의 `initial_yaw` 이벤트로 확인. (도구 수정 예정 — 사소.)
+- 조치: `summarize_run.py` 가 `sequence` 가 아니라 `vehicle.initial_yaw_deg` 를 읽도록 수정 (v0.1.3, 2026-11-10 밤). 이제 `initial_yaw=359.999(current heading at arm ...)` 로 표시.
 
 **Windows 에서 `python3 - <<EOF` 로 한글 포함 스크립트를 넘기면 `unicodeescape` / cp949 오류**
 - 원인: stdin 이 cp949 로 읽힌다. 경로의 `\U` 도 이스케이프로 해석.
 - 조치: 스크립트는 파일로 저장해 실행하거나 Write 도구로 직접 쓴다. 서버(리눅스)에서는 문제 없음.
+
+**arm 직후 `Offboard FAILED: NO_SETPOINT_SET` → 비상정지 (2026-11-10, SITL 인스턴스 4, 서버 load 28)**
+- 증상: priming 3 s 동안 20 Hz setpoint 스트림이 돌았는데도 `offboard.start()` 가 NO_SETPOINT_SET. 기체는 지상 arm 상태에서 착륙 명령·disarm 으로 정리됨.
+- 원인: 과부하로 lockstep 시뮬·mavsdk_server 가 지연돼 PX4 가 최근 setpoint 를 못 본 것으로 판단(병렬 3 인스턴스 + 타 사용자 Gazebo). 같은 코드가
+  다른 8회에서는 문제없었다. 실기에서는 mavsdk_server 가 기체 안에서 돌아 가능성이 낮지만 0 은 아니다.
+- 조치: v0.1.3 재시도 3회(0.5 s 간격). 실행 중 재발하면 콘솔의 `Offboard start rejected (...) retry k/3` 로 보인다. 재시도도 소진되면 비상정지.
+  재실행 결과(instance 2) 는 재시도 없이 통과.
 
 ### 비행 로직에서 확인된 동작 (버그 아님, 알아 둘 것)
 
@@ -194,5 +237,7 @@ ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && INSTANCE=2 sim/run_sim
 ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && python3 sim/summarize_run.py logs/<시각>_i2'
 scp -r dronesim_tailscale:~/starling_sim/marker_drift/logs/<시각>_i2 C:/Users/ericj/sim_logs/marker_drift/
 ssh -f -N -L 5901:localhost:5901 dronesim_tailscale      # 화면 보기 (RealVNC Viewer → localhost:5901)
+ssh dronesim_tailscale 'docker exec -d -e DISPLAY=:1 -e QT_X11_NO_MITSHM=1 -e GZ_PARTITION=starling_2 starling-gz gz sim -g'  # 실행 중 인스턴스 2 에 Gazebo GUI 붙이기
+ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && python3 sim/pilot_stats.py logs/20261110_19*_i*'   # 여러 비행 통계 (조건별 s, n)
 ```
 인스턴스 2·3 병렬 가능(각 ~3.5 분). 끝난 뒤 `pgrep -af "px4|gz sim"` 가 비어 있어야 정리된 것. 서버의 `~/Drone_project` 클론은 뒤처져 있으니 건드리지 않는다.

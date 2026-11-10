@@ -5,9 +5,8 @@
 시뮬 기반은 리포의 `drone_sim_gz/` (PX4 v1.15.4 SITL + gz Harmonic, 컨테이너 `starling-gz` / `starling-flight`; 2026-11-10 main 에 병합됨).
 **그쪽 파일은 수정하지 않는다** — 인스턴스 2~5 도구를 호출만 한다.
 
-**검증 상태 (2026-11-10, 연구실 서버 agtechlab 인스턴스 2):** 1차 `--no-align --stop-mode distance --distance 0.5` completed,
-2차 `--condition A --run 1` ALIGNED → center ok → out STOPPED(태그 10) → back STOPPED(태그 0) → 착륙. `legs_settled` drift_along −0.004 m.
-서버 접속·결과는 `worklog/2026-11-10.md`.
+**검증 상태 (2026-11-10, 연구실 서버 agtechlab 인스턴스 2~4):** 정상 3회(T·A) + 오류 주입 6종 + 2열 동일 ID 월드 A/C + 시뮬 파일럿 A·B·C×3 = 20회 통과
+(A2 1회 `NO_SETPOINT_SET` 실패 → 재시도 추가 후 재실행 통과). 코드 바닥 잡음 settled drift s ≈ 0.5 cm. 상세·수치는 `docs/12_marker_drift_experiment_log.md`.
 
 ## 무엇이 어떻게 대체되는가
 
@@ -79,9 +78,20 @@ INJECT='{"step_e":-0.3,"step_at":25}' sim/run_sim_drift.sh --condition S --run 1
 INJECT='{"noise_pos_m":0.02,"noise_vel_m_s":0.05}' sim/run_sim_drift.sh --condition N --run 1
 sim/run_sim_drift.sh --condition M --run 1 --end-tag 11 --max-extra 0.5          # 끝 태그 없음 → MAX_DIST → 그 자리 착륙
 python3 sim/summarize_run.py logs/<시각>_iN                                        # 폴더 요약 (정지 사유·settled·err 통계·gt 범위)
+python3 sim/pilot_stats.py logs/20261110_19*_i*                                   # 여러 비행 → 조건별 mean/s, n ≈ 16(s/Δ)², Welch t (docs/09 §5.4)
 ```
 2026-11-10 결과(6 시나리오 모두 설계대로; 횡방향 점프 0.8 m 는 지오펜스 2.5 m 안이라 통과하므로 실기 통로에선 `--max-horizontal-dev` 를 조일 것):
 `worklog/2026-11-10.md` 표.
+
+## 화면으로 보기 (TurboVNC :1)
+
+`run_sim_drift.sh` 는 headless 로 gz 서버만 띄운다. 서버가 뜬 뒤(sitl.log 에 `run_sitl_instance` 줄) 같은 파티션에 GUI 클라이언트만 붙이면
+VNC 화면(`DISPLAY=:1`, 컨테이너에 X 소켓이 마운트돼 있다)에 Gazebo 창이 뜬다. 관전용이며 비행 로직에 영향 없다. 마우스로 회전·줌,
+모델 우클릭 → Follow. 서버가 내려가면 창도 닫히므로 매 실행마다 다시 붙인다.
+
+```bash
+docker exec -d -e DISPLAY=:1 -e QT_X11_NO_MITSHM=1 -e GZ_PARTITION=starling_2 starling-gz gz sim -g   # 인스턴스 2
+```
 
 ## 월드 기하 (`make_banner_world.py`)
 

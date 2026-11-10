@@ -36,7 +36,7 @@ def summarize(d):
     seq = s.get("sequence", {})
     print("result: completed=%s landed_in_place=%s exception=%s initial_yaw=%s(%s)" % (
         seq.get("completed"), seq.get("landed_in_place"), seq.get("exception"),
-        s.get("initial_yaw_deg"), s.get("initial_yaw_source")))
+        (s.get("vehicle") or {}).get("initial_yaw_deg"), (s.get("vehicle") or {}).get("initial_yaw_source")))
     a = seq.get("align") or {}
     print("align : %s  err %.2f deg  %s" % (a.get("state"), fnum(a.get("final_yaw_error_deg")), a.get("reason")))
     c = seq.get("center") or {}

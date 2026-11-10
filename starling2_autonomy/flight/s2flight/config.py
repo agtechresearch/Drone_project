@@ -33,6 +33,9 @@ class FlightConfig(object):
     setpoint_hz = 20.0
     pos_ok_hold_sec = 5.0
     max_stream_fail = 5
+    # offboard.start() 가 NO_SETPOINT_SET 등으로 거부되면 이만큼 재시도 (지상 arm 상태, 2026-11-10 SITL 과부하에서 1회 발생)
+    offboard_start_retries = 3
+    offboard_retry_sec = 0.5
     mav_stale_warn_sec = 1.5
     feedback_stale_warn_sec = 0.8
 
@@ -140,6 +143,9 @@ class FlightConfig(object):
         g.add_argument("--voxl-pipes", nargs="*", default=list(FlightConfig.voxl_pipes),
                        help="voxl-inspect-pose -n 으로 같이 기록할 포즈 파이프")
         g.add_argument("--csv-sample-sec", type=float, default=FlightConfig.csv_sample_sec)
+        g.add_argument("--offboard-start-retries", type=int, default=FlightConfig.offboard_start_retries,
+                       help="offboard 시작 거부(NO_SETPOINT_SET 등) 시 재시도 횟수. 0 = 즉시 비상정지(v14 동작)")
+        g.add_argument("--offboard-retry-sec", type=float, default=FlightConfig.offboard_retry_sec)
         g.add_argument("--server-address", default=FlightConfig.server_address)
         g.add_argument("--port", type=int, default=FlightConfig.port,
                        help="mavsdk_server 포트. SITL 인스턴스 N 은 50051+N")

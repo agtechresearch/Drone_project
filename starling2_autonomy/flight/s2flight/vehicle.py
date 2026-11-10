@@ -437,7 +437,19 @@ class Vehicle(object):
             log("       *** RC must be in OFFBOARD mode ***")
         log("       Starting offboard...")
         try:
-            await self.drone.offboard.start()
+            attempts = 1 + max(0, int(getattr(self.cfg, "offboard_start_retries", 0)))
+            for i in range(attempts):
+                try:
+                    await self.drone.offboard.start()
+                    break
+                except OffboardError as e:
+                    if i + 1 >= attempts:
+                        raise
+                    result = getattr(getattr(e, "_result", None), "result", e)
+                    log("       Offboard start rejected ({}), retry {}/{} in {:.1f}s (armed on ground, stream running)".format(
+                        result, i + 1, attempts - 1, self.cfg.offboard_retry_sec))
+                    self.event("offboard_retry", str(result))
+                    await asyncio.sleep(self.cfg.offboard_retry_sec)
             log("       Offboard active!")
             self.geofence.arm((self.target.north_m, self.target.east_m, self.target.down_m))
             if self.geofence.armed:

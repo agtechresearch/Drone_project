@@ -181,7 +181,8 @@ Drone_project/starling2_autonomy/
 │   ├── handoff_2026-10-27/            SITL 재현용 인계 자료 (PX4 파라미터 덤프·물리값·ulog)
 │   └── marker_drift_gz/               드리프트 실험 SITL 선검증: 현수막 월드 생성기, 시뮬 태그 검출기(UDP), 월드 설치,
 │                                      run_sim_drift.sh(인스턴스 기동→mavsdk_server→비행 --sim, INJECT 오차 주입), summarize_run.py(결과 요약),
-│                                      서버 동기화. drone_sim_gz 파일 불변. 2026-11-10 서버 검증 8회 통과 → docs/12
+│                                      pilot_stats.py(여러 비행 → 조건별 s·n), 서버 동기화. drone_sim_gz 파일 불변.
+│                                      2026-11-10 서버 검증 20회(정상 3·오류 주입 6·2열 동일 ID 2·파일럿 9) 통과 → docs/12
 ├── tools/                 ← 기체 동기화
 │   ├── deploy.sh                      로컬 → 기체 단일 파일 (백업·md5·문법검증 포함)
 │   ├── deploy_pkg.sh                  s2flight 패키지 + 진입 스크립트 폴더 배포 (tar, 파일별 md5, compileall)
@@ -192,7 +193,7 @@ Drone_project/starling2_autonomy/
     ├── test_mpa_tag_detections.py     태그 검출 파서 49항목 검증
     ├── test_tag_align.py              태그 정렬 측정·컨트롤러 74항목 검증 (가짜 카메라·가짜 기체)
     ├── test_marker_drift.py           마커 드리프트 파이프라인 70항목 검증 (venv 필요)
-    ├── test_s2flight.py               s2flight 패키지 139항목: 태그 정지 시퀀스(FakeBannerCamera) 포함, 단위 + 가짜 MAVSDK·가짜 벽 카메라로 실험 시퀀스 전체 + SITL 모드(--sim, UDP 태그)
+    ├── test_s2flight.py               s2flight 패키지 148항목: 태그 정지 시퀀스(FakeBannerCamera) 포함, 단위 + 가짜 MAVSDK·가짜 벽 카메라로 실험 시퀀스 전체 + SITL 모드(--sim, UDP 태그)
     └── marker_drift/                  docs/09 후처리 패키지: coverage·calibrate·detect·noise·analyze·compare
         ├── README.md                  사용법·좌표계·손 촬영 검증 절차
         └── layouts/lab_default.yaml   기본 마커 배치 (설치 후 실측값으로 갱신)

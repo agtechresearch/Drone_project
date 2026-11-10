@@ -34,6 +34,7 @@ from s2flight.recorder import FlightRecorder              # noqa: E402
 from s2flight import sim as s2sim                         # noqa: E402
 from s2flight import drift as s2drift                     # noqa: E402
 from s2flight.vehicle import Vehicle                      # noqa: E402
+from s2flight import vehicle                              # noqa: E402  (OffboardError fallback for retry test)
 from s2flight.voxl_logger import VoxlLogger               # noqa: E402
 import marker_drift_flight as mdf                         # noqa: E402
 
@@ -862,6 +863,55 @@ try:
        and abs(seq["legs_settled"][0]["drift_along"] - seq["legs_settled"][0]["truth_along"] * 0.05 / 0.95) < 0.02 and seq["legs_settled"][0]["drift_along"] > 0.03,
        str([(l["status"], round(l["drift_along"], 3)) for l in seq["legs"]] + [round(l["drift_along"], 3) for l in seq["legs_settled"]]))
     ok("sim pose source used for reach", v.voxl_latest[v.reach_pipe]["raw"] == s2sim.SIM_RAW)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# 11. offboard start retry (2026-11-10: SITL 과부하에서 NO_SETPOINT_SET 1회)
+# ---------------------------------------------------------------------------
+
+print("\n[offboard start retry]")
+tmp = tempfile.mkdtemp(prefix="s2f_")
+try:
+    class FlakyDrone(FakeDrone):
+        def __init__(self, fail_n, **kw):
+            FakeDrone.__init__(self, **kw)
+            self.fail_n = fail_n
+
+        async def _offboard_start(self):
+            self.cmd_log.append("offboard_start")
+            if self.fail_n > 0:
+                self.fail_n -= 1
+                raise vehicle.OffboardError("NO_SETPOINT_SET")
+
+    async def start_only(drone, cfg):
+        rec = FlightRecorder(cfg, out_dir=tmp, prefix="r")
+        v = Vehicle(cfg, recorder=rec, drone=drone, pose_readers=False, initial_yaw=drone.yaw)
+        drone.vehicle = v
+        await v.connect()
+        await v.wait_position_stable(timeout=5.0)
+        await v.capture_initial_mavsdk_position(samples=3, interval=0.05)
+        err = None
+        try:
+            await v.start_monitors_and_offboard(prime_sec=0.3)
+        except vehicle.OffboardError as e:
+            err = e
+        finally:
+            await v.cancel_background_tasks()
+        return v, err
+
+    d1 = FlakyDrone(2)
+    v1, e1 = loop.run_until_complete(start_only(d1, fast_cfg(offboard_start_retries=3, offboard_retry_sec=0.05)))
+    ok("retry: 2 rejections then success -> offboard_started, 3 start calls", e1 is None and d1.cmd_log.count("offboard_start") == 3
+       and any(ev.get("event") == "offboard_started" for ev in v1.rec.events) and not v1.aborted, str(d1.cmd_log))
+    ok("retry events recorded", sum(1 for ev in v1.rec.events if ev.get("event") == "offboard_retry") == 2)
+    d2 = FlakyDrone(5)
+    v2, e2 = loop.run_until_complete(start_only(d2, fast_cfg(offboard_start_retries=3, offboard_retry_sec=0.05)))
+    ok("retry exhausted -> OffboardError + emergency stop (land)", e2 is not None and d2.cmd_log.count("offboard_start") == 4
+       and "land" in d2.cmd_log and v2.aborted, str(d2.cmd_log))
+    d3 = FlakyDrone(1)
+    v3, e3 = loop.run_until_complete(start_only(d3, fast_cfg(offboard_start_retries=0)))
+    ok("retries=0 keeps v14 behaviour (first rejection -> abort)", e3 is not None and d3.cmd_log.count("offboard_start") == 1 and v3.aborted, str(d3.cmd_log))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
