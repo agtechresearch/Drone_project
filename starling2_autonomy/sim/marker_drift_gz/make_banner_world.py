@@ -14,7 +14,8 @@
         태그 id → 월드 좌표(x, y, z), 현수막 평면, 권장 스폰 포즈. 진실값 비교용.
 
 좌표 약속 (docs/09 §5.2 와 같은 배치를 gz 월드에 옮김)
-    기체 스폰 (0, 0, 0.035) 북향(yaw 1.5708 — drone_sim_gz 규칙: 항상 N 을 보고 스폰). 현수막은 기체 왼쪽 = -x 에 있다.
+    기체 스폰 (0, 0, 0.035). 현수막은 -x 에 있다. v0.2.4 부터 run_sim_drift.sh 기본 스폰은 서향(yaw 3.1416) = 현수막 정면·회전 없음
+    (종전: 북향 1.5708 + 좌회전 90°).
     비행: 이륙 → 좌회전 90° (서향, 현수막 정면) → 정렬 → "우측" 이동 = +y 로 --distance m. 태그 k 는 y = k * spacing 에 있어
     태그 0 이 시작점 정면, 태그 9 가 4.5 m 지점 정면이다 (2026-11-10 실험장: 현수막이 짧아 0~9).
 
@@ -174,7 +175,7 @@ def build(args):
         len(rows), ids[0], "-{}".format(ids[-1]) if len(ids) > 1 else "", args.size, print_size, args.spacing, y_max))
     print("banner: plane x = {:+.3f} m (standoff {:.2f}), {:.2f} m long, {:.2f} m high, centre z {}".format(
         x_plane, args.standoff, banner_len, args.banner_h, ", ".join("{:.2f}".format(r[1]) for r in rows)))
-    print("spawn : {}  (facing N; after the -90 turn the camera faces -x = the banner)".format(layout["spawn_pose"]))
+    print("spawn : {}  (layout spawn pose; run_sim_drift.sh default now faces W = the banner, no turn)".format(layout["spawn_pose"]))
 
 
 def main():

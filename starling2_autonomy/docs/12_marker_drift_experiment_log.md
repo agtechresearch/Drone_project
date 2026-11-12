@@ -229,6 +229,58 @@ VIO 불안정(BAD/리셋)은 1차 충돌 전 12:22 부터 있었다 → **오늘
   이륙 지점에 무늬(태그판·상자·바닥 종이) 확보, 어떤 비행이든 끝나면 다음 비행 전 vio_check 재실행(바이어스·경고 확인), 충돌·경고 뒤 재부팅.
 - 분석 스크립트(스크래치): `ulog_bowl.py`(이륙 뒤 1 s 타임라인: EKF/EV yaw·품질·위치·속도·이노베이션), `ulog_ceiling.py`(z·vz·EV z·거리 센서·추력·setpoint 0.25 s).
 
+### 2026-11-12 (밤) — 조준 회전 제거(정면 이륙), ModalAI 권장값 대조
+- 사용자 결정: 좌회전 90° 를 없애고 **기체가 현수막을 정면으로 본 채 이륙**. v0.2.4: `--turn-deg` 기본 0, |turn| < 0.5° 면 `aim_turn` 단계 생략(`post_takeoff_settle` 호버만). docs/09 갱신. 테스트 202/202.
+  SITL 은 스폰을 서향(`SPAWN=0,0,0.035,0,0,3.1416`, 이제 run_sim_drift.sh 기본값)으로 바꿔 현수막(-x)을 정면으로 보게 함 — A13 `20261112_161658_i2` 완료:
+  회전 없이 settle 2 s → 정렬 1.0 s 만에 ALIGNED(err -0.01°) → 왕복, settled drift out +0.001 / back +0.003 m (종전과 동일 수준).
+- 바닥 격자는 원래 깔려 있었음 → 지상에서 특징점 6 은 **전방 카메라** 시야 문제. 하방 카메라는 지상에서 바닥과 수 cm 라 초점이 안 맞아 이륙 전엔 기여가 없고, 이륙 순간 VIO 를 지키는 건 전방 카메라다.
+- ModalAI 권장값 대조(기체 현재값 = 오늘 ulog 초기 파라미터): 플랫폼 `D0014_Starling_2.params`·`indoor_vio_missing_gps.params`·docs *flying-with-vio* 와 비교.
+  일치: SYS_HAS_MAG/GPS 0, EKF2_MAG_TYPE 5, EKF2_EV_CTRL 15(오늘 수정), EKF2_HGT_REF 3, EKF2_GPS_CTRL 0, EKF2_BARO_CTRL 1, EKF2_RNG_CTRL 1, EKF2_EV_QMIN 1(프리셋 값; 플랫폼 파일은 16),
+  EKF2_EV*_NOISE 0.1, EKF2_EV_DELAY 0, MPC_THR_HOVER 0.34, COM_DISARM_LAND 0.1. 차이: MPC_TKO_SPEED 0.5(권장 1.5 — 우리가 느리게 둔 것, 유지), EKF2_RNG_CTRL 1 은 '조건부'라
+  VIO 상실 중 거리 센서가 높이를 받쳐 주지 않았다(3차 사고 때 `cs_rng_hgt 0`). 선택지: `EKF2_RNG_CTRL 2`(항상) — 책상 위 통과 시 높이 튐 부작용, 결정 보류.
+  docs 권고 중 운용 항목: 근거리+원거리 텍스처, 저조도·무늬 없는 바닥 회피, 렌즈 청결·초점, 진동, vision-hub 기동 30 s 대기, Position 모드로 이륙, 비상 시 Manual 전환(킬은 착륙 후).
+
+### 2026-11-12 (밤, 추가) — 11-03~11-05 전체 비행 로그 회수·비교: "그때는 잘됐다" 의 실체
+- 회수: sess171(11-03, 10개)·172(11-04)·174~178(11-05, 28개) → `sim_logs/marker_drift/real_20261103_05/`, 표 `flight_table_1103_1112.txt`(스크립트 `ulog_table.py`: 비행당 arm 시각(부팅 기준)·EV 품질·무효 샘플·추측항법(DR) 횟수·vz 최대·거리센서 최대·킬·바이어스).
+- **11-05 의 "문제없던 8회" = sess178/log101~108**(부팅 177~812 s 뒤, 51 s offboard ×8): 무효 ≤ 4 샘플, quality<50 ≤ 3.3 %, DR 0, 호버 1.0 m. 확실히 깨끗했다.
+- 그러나 **같은 날 각 부팅의 첫 비행은 전부 지금과 같은 기전**이었다: sess174/log100(DR 1, 거리센서 2.15 m, accel bias 0.40), sess175/log100(부팅 85 s arm, 무효 94, DR, vz 3.07 m/s, 거리센서 2.28 m),
+  sess175/log103·105(무효 93, DR, 2.1 m), sess176/log100(DR, 무효 60, 킬), sess177/log100(부팅 50 s arm, 무효 93, DR), **sess178/log100(부팅 128 s arm, 무효 92, DR, 거리센서 2.18 m)** — 그 8회 직전 비행.
+  천장(≈2.5 m) 직전까지 올라갔다가 조종자가 잡은 비행이 최소 6번. 사고로 기억되지 않았을 뿐 같은 일이 11-05 에도 반복됐다.
+- 11-03 sess171 은 전부 깨끗(무늬 있는 자리, 부팅 뒤 1~70 분). 11-04 sess172/log101 은 194 s 수동 비행에서 quality<50 18 %.
+- 결론: 패턴은 "부팅 뒤 첫 비행·2 분 안 arm → 이륙 순간 VIO 상실 → 상승" 으로 11-05 부터 동일했고, VIO 가 자리 잡은 뒤의 연속 비행만 깨끗했다. 지금은 자리(특징점 6)가 나빠 자리 잡은 뒤에도 여유가 없어 빈도가 올랐다.
+- 검출기 가설 기각: 같은 자리에서 검출기 끄고/켜고 10 s 비교 — 둘 다 30.1 Hz, quality 96, 특징점 0(시야 문제). CPU: voxl-tag-detect 63 %, camera-server 47 %, open-vins 26 %(8코어). 11-05 비행들은 검출기 없이도 같은 기전.
+- 기체: v0.2.4 배포됨(부팅 2 분 시점). 11-05 당시 accel bias z 도 0.33~0.40 까지 커진 로그가 여럿 — 바이어스 누적도 그때부터.
+
+### 2026-11-12 (밤, 현장) — 무늬 보강 뒤 특징점 20, VIO 15 Hz 의 의미
+- 이륙 지점에 무늬를 둔 뒤 vio_check: 특징점 20, quality 94, 정지 드리프트 0.000 m, 헤딩 0.00 °/s, 자이로 바이어스 정상. 남은 FAIL 은 **VIO 출력률 15.1 Hz < 20**.
+- 검출기 끄고/켜고 비교: 둘 다 dt 66.3 ms(15.1 Hz)·특징점 19 → 검출기 무관. 특징점 0 일 때는 30 Hz. 11-10 voxl-logger ov 원본: 특징점 6~8 에서 25~30 Hz.
+  → OpenVINS 가 추적할 특징점이 많으면 처리 시간이 늘어 매 2 프레임(66.7 ms)만 내는 것이 정상 동작. 카메라는 30 fps·노출 5.2 ms·게인 158(밝음)이라 조명 문제 아님.
+- 조치: `vio_min_rate_hz`·`vio_check --min-rate` 20 → **10**(정지만 잡음). 특징점·품질이 예측 지표이고 출력률은 아니다(1차 사고 녹화는 30 Hz 였다).
+- 이 자리 기준치: features ≥ 8 ✔, quality 94 ✔, drift 0 ✔, 15 Hz ✔(새 기준). EKF accel bias z 0.29 m/s² 는 한계(0.30) 턱밑 — 아래 참조.
+
+### 2026-11-12 (밤) — **점검 비행 T1 성공 → PX4 LAND 모드에서 옆으로 1.5 m 달아남 (원인: 전역 기준 없는 LAND 모드)**
+- 콘솔 `20261112_095243_T1`, ulog `sess182/log101.ulg`, voxl-logger `log0006` → `sim_logs/marker_drift/real_20261112/check1/`.
+- 비행: 게이트 PASS(특징점 12, yaw 드리프트 0.01°) → 0.4 m 이륙(14 s 안정) → 정면 settle → hover → **우 0.50 m(오차 1 cm, cross 1 cm) → 좌 0.50 m(복귀 오차 0~1 cm)** → preland 0.25 m. 헤딩 29.1±0.4°, VIO quality 75~96·특징점 30. **실험 사이클 자체는 완벽.**
+- `Land command` 뒤: 조종기 입력 0, VIO·헤딩 정상인데 **PX4 LAND 모드의 궤적 setpoint 가 0.1 s 부터 옆으로 이동**(trajectory_setpoint vx/vy -0.13 → -0.36 → -0.59 → -0.81 → -0.94/-1.33 m/s), 기체 1 s 만에 1.5 m/s.
+  +1.03 s 조종자 개입(MAN) → 바닥 접촉·138° 회전(원시 자이로 적분) → VIO 상실(특징점 0, yaw 169°). 사용자 킬. 기체는 좌후방으로 밀려 멈춤.
+- 원인: `position_setpoint_triplet.current` = type LAND, **lat/lon 0.0**, `vehicle_local_position.xy_global 0, ref_lat NaN`. 이 기체는 GPS·전역 기준이 없어 navigator 의 '현재 위치에 착륙' 목표가
+  정의되지 않는다. 결과는 때마다 다르다: 11-05 (log108) 는 setpoint 가 제자리를 지켰고, **11-10 2차 사고(log102, 비상 착륙)** 는 setpoint 가 즉시 NaN 이 되며 1 s 에 0.8 m 밀렸고(당시 VIO 붕괴로 해석했으나 이것이 1차 원인), 오늘은 setpoint 가 흘러갔다.
+- 조치 **v0.2.5**: PX4 LAND 를 쓰지 않는다. 정상·비상 접지 모두 **offboard body-velocity setpoint(전방 0·우측 0·하강 0.3/0.4 m/s·yaw 속도 0)** 로 내려 land detector(in_air False) 또는
+  피드백 고도 정지로 접지 판정 → disarm. 헤딩·위치 추정과 무관하므로 VIO 리셋에도 옆으로 가지 않는다. 8 s 안에 접지 없으면 PX4 LAND 폴백. `--land-mode px4` 로 종전 방식.
+- 테스트 206/206 (+4: offboard 접지 완주·px4 모드·비상 접지·타임아웃 폴백). SITL A14/V8 (아래 갱신).
+- 사용자: "이동속도가 너무 빨랐어" → 측면 이동 기본 **0.5 → 0.25 m/s**(`--speed`), 점검 비행은 0.2. docs/09 갱신(4.5 m 에 18 s).
+
+### 2026-11-12 (밤) — 점검 비행 T1 #2 (v0.2.5, 재부팅·원점 = 이륙 지점): 비행 완벽, 접지 판정 6 s 지연 → v0.2.6/0.2.7
+- 콘솔 `20261112_103403_T1`, ulog `sess183/log100.ulg` → `real_20261112/check2/`. 게이트 PASS(특징점 18) → 0.4 m → 우 0.50(오차 1 cm) → 좌 0.49 → preland 0.25 → **TOUCHDOWN 0.3 m/s: 1.1 s 에 바닥**.
+- 거리 센서는 하강 1 s 뒤 0.00 인데 PX4 land detector 는 **6 s 뒤**(ground_contact −0.5 s, landed 0 s)에야 반응. 그 사이 모터 저추력으로 바닥에 앉아 EKF 위치 17 cm 흐름(바닥 근처 VIO quality 57→8). 사용자: "착륙이 느리면 착륙 위치에서 벗어난다".
+- 내 피드백 정지 판정이 안 난 이유: 접지 루프가 `in_air` 스트림(1 Hz)에 묶여 1 s 간격 샘플(ΔU 2~4 cm)로 매번 리셋. 접지 뒤 바닥에서 VIO 가 끊기자 비행 중 감시가 'VIO LOST' 비상 착륙을 한 번 더 호출(무해하지만 지저분).
+- **v0.2.6**: `_in_air_monitor`(구독 하나) + 접지 루프 0.2 s 폴링, 0.8 s 창의 U 변동 < 2 cm & U < 6 cm 면 접지; 접지 시 `offboard_active False`(비행 중 감시 종료), 즉시 disarm. `_wait_landed` 폴링화.
+- **v0.2.7**: disarm 이 거부되면(land detector 가 아직 비행 중이라 보면) `action.kill()` = 강제 disarm 으로 모터 정지(바닥 확인 뒤라 안전); 하강 0.3 → 0.4 m/s; 창 1.0 → 0.8 s. 테스트 210/210.
+  이 기체 MAVSDK-Python 엔 `distance_sensor` 스트림이 없어 거리 센서는 못 쓴다(`landed_state` 만 있음 = land detector 와 동일).
+  **검증**: SITL A15 `20261112_19*_i2`(v0.2.7 초판) 는 '샘플 3개' 조건 때문에 피드백 판정이 안 나 land detector(5 s)로 접지 → 시간 폭(0.6×창) 기준으로 수정;
+  A16 `20261112_195946_i2`: TOUCHDOWN 0.4 m/s → **1.4 s 에 피드백 정지 판정** → disarm 거부(COMMAND_DENIED_NOT_LANDED) → 강제 disarm 성공. 기체 배포됨(v0.2.7).
+- 비행 사이 "Preflight Fail: Yaw/position estimate error" 메시지로 게이트가 1회 거부 → 재부팅. vio_check 에 PX4 사전점검·EKF 일관성 비율·추정기 플래그 판정 추가(조종기 Offboard 위치면 `pre_flight_checks_pass False` 가 정상이라 플래그로 대신 판정).
+
 ### (다음 항목을 여기에 날짜로 추가)
 - [x] 기체: `tag_locations.conf` 0.20, `skip_n_frames` 1, voxl-tag-detector 기동 (2026-11-10 승인·적용)
 - [x] 손 검출 시험 (2026-11-10): x 오른쪽 +, σ_yaw 0.19° → `--align-tol 1.0`
@@ -243,6 +295,23 @@ VIO 불안정(BAD/리셋)은 1차 충돌 전 12:22 부터 있었다 → **오늘
 ---
 
 ## 2. 패치노트
+
+### v0.2.5 — offboard 접지 (2026-11-12 밤, 점검 비행 착륙 밀림 뒤)
+- `vehicle.py`: `offboard_touchdown()` — streamer 가 `set_velocity_body(0, 0, v_down, 0)` 를 보내며 하강, 접지 = `in_air False` 또는 피드백 U < 0.06 m 가 1 s 정지, 타임아웃 8 s → `action.land()` 폴백.
+  `land_and_disarm` 은 `land_mode == offboard` 이고 offboard 가 살아 있으면 이것을 쓴다. `trigger_emergency_land` 도 streamer 를 끊지 않고 비상 접지(0.4 m/s) → 실패 시 종전 land/kill.
+  `land_and_disarm` 은 진행 중인 비상 접지를 기다린 뒤 disarm(streamer 를 먼저 끊어 PX4 offboard failsafe 를 유발하지 않도록).
+- `config.py`: `land_mode offboard|px4`, `land_descent_mps 0.3`, `emergency_descent_mps 0.4`, `land_timeout_s 8`, `land_touch_u_m 0.06`, `land_still_du_m 0.01`, `land_still_s 1.0`; CLI `--land-mode --land-descent --land-timeout-sec`.
+- 가짜 기체: `set_velocity_body` 적분(시간 기반), 접지 시 in_air False. 테스트 206/206.
+**검증**: 단위테스트 206/206. SITL A14 `20261112_190724_i2`: 왕복 완료 → TOUCHDOWN 0.30 m/s, U 0.25 → 0.04 → 0.00, 옆 이동 7 cm 이내, 피드백 정지 판정으로 LANDED → disarm.
+V8 `20261112_190744_i3`: offboard +15 s VIO 상실 → EMERGENCY_TOUCHDOWN 0.40 m/s → gz 실제 고도 0.61 → 0.03 m (2 s) → land detector 로 LANDED(+5.2 s) → disarm, 옆 이동 없음.
+  (SITL 특이: 비상 접지 중 MAVSDK/피드백 U 가 0.59 에 고정 — 시뮬 텔레메트리 경로 문제로 보임, 실기는 voxl-inspect-pose 파이프라 무관. 추후 확인.)
+기체 배포됨(v0.2.5 + 속도 0.25).
+
+### v0.2.4 — 조준 회전 제거 (2026-11-12 밤)
+- `marker_drift_flight.py`: `DriftParams.turn_deg` 기본 0, `--turn-deg` 기본 0. |turn_deg| ≥ 0.5 면 종전대로 `aim_turn`+`post_turn`, 아니면 `post_takeoff_settle` 호버(post_turn_hover 초)만.
+- docs/09 §(순서·배치표) 갱신: 현수막은 이륙 시 정면, 우측 이동 = 태그 번호 증가 방향, 이륙 지점 오른쪽으로 5 m 확보.
+- 테스트 202/202 (+2: turn 0 이면 aim_turn 없음·완주, 기본값 0). 기존 단계 순서 테스트는 `turn_deg=-90` 명시.
+**검증**: SITL A13 `20261112_161658_i2` 서향 스폰·회전 없음 → 정렬·왕복·착륙 완료, drift ≤ 3 mm.
 
 ### v0.2.3 — 가속도계 바이어스·특징점·출력률 게이트 (2026-11-12 저녁, 3차 사고 뒤)
 - `vio.py`: `parse_px4_accel_bias`, `read_px4_sensor_bias`(자이로+가속도계; `read_px4_gyro_bias` 는 래퍼), `VioHistory.summarize` 에 `rate_hz`.
@@ -463,6 +532,12 @@ V4 `20261110_225518_i3` offboard +20 s VIO 상실 → 0.5 s 뒤 EMERGENCY LAND �
   → 지오펜스·불일치 감시가 SITL 검증에서 꺼진 채 "통과" 로 보였다.
 - 조치: v0.2.1 구조 수정(위). 검증 기준에 **sync.csv `mav_updates` > 0, `mav_rel_u` 가 `fb_rel_u` 를 따라감** 을 추가. 같은 스트림을 두 곳에서 구독하지 말 것.
 
+**PX4 LAND 모드에서 착륙 직후 옆으로 달아남 (2026-11-10 2차 사고 · 2026-11-12 점검 비행)**
+- 증상: `action.land()`/비상 착륙 직후 조종기 입력 없이 수평 가속(1 s 에 0.8~1.5 m/s). VIO·헤딩은 정상일 수도 있다.
+- 원인: GPS·전역 기준이 없는 기체(`xy_global 0`, `ref_lat NaN`)에서 LAND 모드의 `position_setpoint_triplet` lat/lon 이 0 → 착륙 목표점이 정의되지 않음. 같은 상황에서도 때마다 결과가 다르다(11-05 정상, 11-10 즉시 NaN, 11-12 흘러감).
+- 판별: ulog `position_setpoint_triplet.current.lat/lon == 0`, `trajectory_setpoint` x/y 가 LAND 진입 직후 움직이거나 NaN.
+- 조치: v0.2.5 부터 PX4 LAND 를 쓰지 않고 offboard body-velocity 하강으로 접지. 조종자가 직접 내릴 때도 **Position 모드 스로틀 하강**을 쓰고 RTL/LAND 스위치는 쓰지 말 것.
+
 **게이트가 'yaw drift … (0 samples)' 로 PASS — 헤딩 검사가 꺼진 채 통과 (2026-11-12 SITL V6)**
 - 증상: mission.log 게이트 줄에 `(0 samples)`, `[heading] EKF-VIO yaw offset …` 줄 없음, sync.csv 에 `yaw_ekf_vio_dev_deg` 열 없음. 같은 코드로 바로 전 실행(V5·A10)은 30 샘플.
 - 원인: `capture_initial_yaw` 가 `attitude_euler` 를 따로 구독하고 `aclose()` 한 뒤, 뒤에 시작한 `sim_pose_task` 의 같은 스트림 구독이 데이터를 못 받는 경우가 있다(MAVSDK-Python 0.12 이중 구독 문제의 변형, 타이밍 의존).
@@ -553,7 +628,7 @@ PYTHONIOENCODING=utf-8 python3 marker_drift_flight.py --no-align --stop-mode dis
 ```bash
 ssh dronesim_tailscale                                   # 키 로그인
 SIM_HOST=dronesim_tailscale ./sim/marker_drift_gz/sync_to_server.sh   # 작업 중 파일 밀어넣기 (커밋 없이)
-ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && INSTANCE=2 sim/run_sim_drift.sh --condition A --run 2'
+ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && INSTANCE=2 sim/run_sim_drift.sh --condition A --run 2'   # 스폰 기본 서향(현수막 정면, v0.2.4). 종전 북향+좌회전: SPAWN=0,0,0.035,0,0,1.5708 ... --turn-deg -90
 ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && python3 sim/summarize_run.py logs/<시각>_i2'
 scp -r dronesim_tailscale:~/starling_sim/marker_drift/logs/<시각>_i2 C:/Users/ericj/sim_logs/marker_drift/
 ssh -f -N -L 5901:localhost:5901 dronesim_tailscale      # 화면 보기 (RealVNC Viewer → localhost:5901)

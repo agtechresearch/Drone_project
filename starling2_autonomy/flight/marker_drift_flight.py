@@ -4,7 +4,7 @@
 
  0. 프리플라이트   MAVSDK 연결, 위치 health, 초기 위치, 정면(arm 직전 heading) 확정, 태그 피드 확인, voxl-logger 시작
  1. 이륙          목표 고도(0.6 / 2.0 m). 현수막은 기체 좌측
- 2. 조준 회전      좌회전 90° (--turn-deg, 정면 기준 상대)
+ 2. 조준 회전      없음 — 이륙 시 기체가 현수막을 정면으로 본다 (2026-11-12 변경; --turn-deg 로 상대 회전 지정 가능)
  3. 정밀 정렬      tracking_front 태그 2개 연결선 → yaw 오차 폐루프 (s2flight.align_stage). 15 s 안에 실패하면 착륙
  3b. 센터링        태그 start(0) 가 카메라 정중앙·이격 70 cm 에 오도록 작은 이동 (s2flight.drift.center_on_tag) → 여기가 t0
  4. 호버 기준      10 s
@@ -67,7 +67,7 @@ DEFAULT_OUT_ROOT = "/home/root/marker_drift_logs"
 class DriftParams(object):
     """실험 시퀀스 파라미터 (docs/09 §5.2 + 2026-11-09 태그 정지 설계)."""
 
-    def __init__(self, altitude=0.6, distance=5.0, speed=0.5, turn_deg=-90.0, turn_speed=20.0,
+    def __init__(self, altitude=0.6, distance=5.0, speed=0.25, turn_deg=0.0, turn_speed=20.0,
                  post_turn_hover=2.0, hover_ref=10.0, hover_far=5.0, hover_return=5.0,
                  do_align=True, align=None, condition="A", run=1, standoff=0.70,
                  stop_mode="tag", start_tag=0, end_tag=9, tag_spacing=0.5, center=True, center_tol=0.05,
@@ -137,8 +137,12 @@ async def run_sequence(v, params, feed=None, recorder=None):
             summary["aborted"] = True
             return summary
 
-        await v.turn(p.turn_deg, "aim_turn", "TURN{:+.0f}".format(p.turn_deg), yaw_speed_deg_s=p.turn_speed)
-        await v.hover(p.post_turn_hover, "post_turn")
+        if abs(p.turn_deg) >= 0.5:
+            await v.turn(p.turn_deg, "aim_turn", "TURN{:+.0f}".format(p.turn_deg), yaw_speed_deg_s=p.turn_speed)
+            await v.hover(p.post_turn_hover, "post_turn")
+        else:
+            log("       no aim turn: vehicle faces the banner at takeoff (2026-11-12). settle {:.1f}s".format(p.post_turn_hover))
+            await v.hover(p.post_turn_hover, "post_takeoff_settle")
         if v.aborted:
             await v.land_and_disarm()
             summary["aborted"] = True
@@ -252,8 +256,8 @@ def build_arg_parser():
                    help="--stop-mode distance 에서의 측면 이동 거리 m. 태그 모드에서는 안 쓰임(현수막 길이 = 간격 x 태그 수)")
     e.add_argument("--standoff", type=float, default=0.70,
                    help="현수막 평면과 기체의 이격 m (2026-11-09 확정 0.70). 비행에는 안 쓰이고 조종자 안내·요약 기록용")
-    e.add_argument("--speed", type=float, default=0.5, help="측면 이동 속도 m/s")
-    e.add_argument("--turn-deg", type=float, default=-90.0, help="조준 회전 (NED 상대, 음수 = 좌회전)")
+    e.add_argument("--speed", type=float, default=0.25, help="측면 이동 속도 m/s (2026-11-12 점검 비행 뒤 0.5 → 0.25: 실내에서 0.5 는 너무 빨랐다)")
+    e.add_argument("--turn-deg", type=float, default=0.0, help="이륙 뒤 조준 회전 (정면 기준 상대, 음수 = 좌회전). 기본 0 = 회전 없음, 기체가 현수막을 보고 이륙 (2026-11-12)")
     e.add_argument("--turn-speed", type=float, default=20.0, help="조준 회전 속도 deg/s")
     e.add_argument("--post-turn-hover", type=float, default=2.0)
     e.add_argument("--hover-ref", type=float, default=10.0, help="정렬 후 기준 호버 s")
@@ -361,8 +365,12 @@ def print_banner(args, params, cfg, out_dir):
     print("  voxl-logger   : {}".format("OFF (SITL)" if cfg.sim else "OFF" if args.no_logger
                                         else " ".join(args.logger_cam) + " + ov + px4 pose + imu, max {}s".format(args.logger_max_sec)))
     print("  Output        : {}".format(out_dir))
-    print("  Takeoff spot : {:.0f} cm from the banner plane, banner on the LEFT, tags 0/1 ahead-left; {:.1f} m+ clear ahead "
-          "(becomes 'right' after the turn). Expected tag size {:.2f} m.".format(p.standoff * 100, p.distance + 0.5, p.align.expected_tag_size_m))
+    if abs(p.turn_deg) >= 0.5:
+        print("  Takeoff spot : {:.0f} cm from the banner plane, banner on the LEFT, tags 0/1 ahead-left; {:.1f} m+ clear ahead "
+              "(becomes 'right' after the {:+.0f} deg turn). Expected tag size {:.2f} m.".format(p.standoff * 100, p.distance + 0.5, p.turn_deg, p.align.expected_tag_size_m))
+    else:
+        print("  Takeoff spot : {:.0f} cm from the banner plane, FACING the banner (no turn), tag 0 ahead; {:.1f} m+ clear to the RIGHT "
+              "(legs move body right / left). Expected tag size {:.2f} m.".format(p.standoff * 100, p.distance + 0.5, p.align.expected_tag_size_m))
     print("  SITL: no RC needed." if cfg.sim else "  RC in OFFBOARD mode, kill switch ready.")
     print("=" * 78)
 

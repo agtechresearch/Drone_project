@@ -35,12 +35,23 @@ from .util import (angle_diff_deg, body_delta_to_ned, evaluate_horizontal_tracki
 
 try:
     from mavsdk import System
-    from mavsdk.offboard import OffboardError, PositionNedYaw
+    from mavsdk.offboard import OffboardError, PositionNedYaw, VelocityBodyYawspeed
 except ImportError:                        # 기체 밖(테스트)에서는 가짜를 넣는다
     System = None
 
     class OffboardError(Exception):
         pass
+
+    class VelocityBodyYawspeed(object):
+        def __init__(self, forward_m_s, right_m_s, down_m_s, yawspeed_deg_s):
+            self.forward_m_s = forward_m_s
+            self.right_m_s = right_m_s
+            self.down_m_s = down_m_s
+            self.yawspeed_deg_s = yawspeed_deg_s
+
+        def __repr__(self):
+            return "VelocityBodyYawspeed(f{:+.2f} r{:+.2f} d{:+.2f} yr{:+.1f})".format(
+                self.forward_m_s, self.right_m_s, self.down_m_s, self.yawspeed_deg_s)
 
     class PositionNedYaw(object):
         def __init__(self, north_m, east_m, down_m, yaw_deg):
@@ -133,6 +144,13 @@ class Vehicle(object):
         self.uptime_s = None
         self.gyro_bias_dps = None
         self.accel_bias_ms2 = None
+        # 접지 (v0.2.5): vel_body 가 있으면 streamer 가 position 대신 body-velocity 를 보낸다
+        self.vel_body = None
+        self._touchdown_task = None
+        self.landed_flag = False
+        self.in_air_latest = None        # telemetry.in_air() 최신값 (_in_air_monitor, 구독 하나만)
+        self._in_air_time = 0.0
+        self.in_air_task = None
         self.expect_armed = False        # 우리가 arm 했고 아직 disarm 명령을 안 냈다
         self._mav_lag_warned = False
         self._mav_proc_last = 0.0
@@ -804,7 +822,7 @@ class Vehicle(object):
         """비행 중 VIO 품질·신선도 감시 (P2). offboard 시작 뒤부터 동작."""
         cfg = self.cfg
         while self.monitoring and not self.aborted:
-            if cfg.vio_gate and self.offboard_active:
+            if cfg.vio_gate and self.offboard_active and not self.landed_flag:
                 now = self.now()
                 if self.vio.n > 0 and self.vio.age(now) > cfg.vio_stale_abort_s:
                     asyncio.ensure_future(self.trigger_emergency_land(
@@ -820,6 +838,19 @@ class Vehicle(object):
                         "FEEDBACK PIPE STALE {:.1f}s ({})".format(fb["age_sec"], self.reach_pipe)))
                 self._check_heading_disagreement(now)
             await asyncio.sleep(0.1)
+
+    async def _in_air_monitor(self):
+        """telemetry.in_air() 를 한 곳에서만 구독해 최신값을 보관한다 (접지 판정·착륙 대기가 폴링으로 쓴다)."""
+        try:
+            async for ia in self.drone.telemetry.in_air():
+                if not self.monitoring:
+                    break
+                self.in_air_latest = bool(ia)
+                self._in_air_time = self.now()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log("       [in_air] monitor stopped: {!r}".format(e))
 
     async def _health_monitor(self):
         consecutive_bad = 0
@@ -839,7 +870,11 @@ class Vehicle(object):
         period = 1.0 / self.cfg.setpoint_hz
         while self.streaming:
             try:
-                await self.drone.offboard.set_position_ned(self.target)
+                vb = self.vel_body
+                if vb is not None:
+                    await self.drone.offboard.set_velocity_body(VelocityBodyYawspeed(vb[0], vb[1], vb[2], vb[3]))
+                else:
+                    await self.drone.offboard.set_position_ned(self.target)
                 self._stream_fail_count = 0
             except Exception as e:
                 self._stream_fail_count += 1
@@ -885,6 +920,7 @@ class Vehicle(object):
             self.mav_stream_task = asyncio.ensure_future(self._mavsdk_position_stream())
         self.mav_lag_task = asyncio.ensure_future(self._mavsdk_lag_monitor())
         self.armed_task = asyncio.ensure_future(self._armed_monitor())
+        self.in_air_task = asyncio.ensure_future(self._in_air_monitor())
         self.health_task = asyncio.ensure_future(self._health_monitor())
         if self.sim:
             pass                                 # sim_pose_task 는 위에서 이미 시작
@@ -1522,40 +1558,122 @@ class Vehicle(object):
         self.make_position_snapshot("before_land")
         return True
 
+    async def offboard_touchdown(self, descent_mps=None, label="touchdown"):
+        """PX4 LAND 대신 offboard body-velocity(전방 0, 우측 0, 하강 v, yaw 속도 0) 로 접지한다 (v0.2.5).
+        헤딩·위치 추정에 의존하지 않으므로 VIO 리셋·전역 기준 부재에 안전하다. 접지 = PX4 land detector(in_air False) 또는
+        피드백 고도가 land_touch_u_m 아래에서 land_still_s 동안 정지. land_timeout_s 안에 접지가 없으면 PX4 LAND 로 폴백."""
+        cfg = self.cfg
+        v = float(cfg.land_descent_mps if descent_mps is None else descent_mps)
+        self.vel_body = (0.0, 0.0, v, 0.0)
+        self.event(label + "_start", "body-velocity descent {:.2f} m/s".format(v))
+        log(">>> {}: offboard body-velocity descent {:.2f} m/s (PX4 LAND not used — no global reference on this vehicle) <<<".format(label.upper(), v))
+        start = self.now()
+        window = collections.deque()          # (t, rel_u) 최근 land_still_s 초
+        landed = False
+        last_log = -1.0
+        try:
+            while True:
+                now = self.now()
+                elapsed = now - start
+                fb = self.feedback_state()
+                n, e, u = self.mav_rel_position()
+                in_air = self.in_air_latest if (now - self._in_air_time) <= 2.0 else None
+                if elapsed - last_log >= 0.5 and fb:
+                    last_log = elapsed
+                    log("       [{}] t={:.1f}s in_air={} fb_rel=(N{:+.2f},E{:+.2f},U{:+.2f}) | mav_rel=(N{:+.2f},E{:+.2f},U{:+.2f})".format(
+                        label, elapsed, in_air, fb["rel_n"], fb["rel_e"], fb["rel_u"], n, e, u))
+                if in_air is False:
+                    landed = True
+                    log("       *** LANDED (land detector, t={:.1f}s) ***".format(elapsed))
+                    break
+                if fb is not None:
+                    window.append((now, fb["rel_u"]))
+                    while window and now - window[0][0] > cfg.land_still_s:
+                        window.popleft()
+                    if len(window) >= 2 and (now - window[0][0]) >= cfg.land_still_s * 0.6:   # 샘플 수가 아니라 시간 폭으로 (루프가 0.6 s 까지 늘어질 수 있다)
+                        us = [w[1] for w in window]
+                        if max(us) < cfg.land_touch_u_m and (max(us) - min(us)) < cfg.land_still_du_m * 2.0:
+                            landed = True
+                            log("       *** LANDED (feedback U{:+.2f}..{:+.2f} still {:.1f}s, t={:.1f}s) ***".format(
+                                min(us), max(us), cfg.land_still_s, elapsed))
+                            break
+                if elapsed > cfg.land_timeout_s:
+                    log("       [{}] no touchdown in {:.0f}s — falling back to PX4 LAND".format(label, cfg.land_timeout_s))
+                    self.event(label + "_timeout")
+                    break
+                await asyncio.sleep(0.2)
+        finally:
+            self.vel_body = None
+        if landed:
+            self.landed_flag = True
+            self.offboard_active = False      # 비행 중 감시(VIO 상실·불일치·헤딩) 종료 — 바닥에서 VIO 가 끊기는 건 정상
+            self.event("landed", label)
+            self.streaming = False
+            # 접지 즉시 disarm. PX4 land detector 가 아직 '비행 중' 이면 일반 disarm 은 거부되므로 강제 disarm(kill = ARM_DISARM force) 으로.
+            # 2026-11-12 점검 비행 2: 바닥에 닿고 5 s 뒤에야 land detector 가 반응, 그동안 모터가 돌며 위치가 17 cm 흘렀다.
+            try:
+                await self.drone.action.disarm()
+                log("       Disarmed (right after touchdown).")
+                self.event("disarmed", "touchdown")
+            except Exception as e:  # noqa: BLE001
+                log("       Disarm after touchdown refused ({}) — force disarm on ground".format(e))
+                try:
+                    await self.drone.action.kill()
+                    log("       Force-disarmed on ground.")
+                    self.event("disarmed", "touchdown_force")
+                except Exception as ke:  # noqa: BLE001
+                    log("       Force disarm failed too: {}".format(ke))
+            return True
+        self.streaming = False
+        await asyncio.sleep(0.2)
+        try:
+            await self.drone.action.land()
+            log("       Land command sent (fallback).")
+        except Exception as e:
+            log("       Land command warning: {}".format(e))
+        return await self._wait_landed(cfg.land_wait_timeout)
+
+    async def _wait_landed(self, timeout):
+        start = self.now()
+        while True:
+            elapsed = self.now() - start
+            if self.in_air_latest is False and (self.now() - self._in_air_time) <= 2.0:
+                log("       *** LANDED ***")
+                self.landed_flag = True
+                self.offboard_active = False
+                self.event("landed")
+                return True
+            if elapsed > timeout:
+                log("       [land] timeout, breaking")
+                self.event("land_timeout")
+                return False
+            await asyncio.sleep(0.25)
+
     async def land_and_disarm(self):
         self.expect_armed = False          # 착륙·disarm 은 우리가 명령한 것 (외부 disarm 감시 해제)
         log("[7/7] Landing...")
         self.geofence.disarm()                  # 착륙은 setpoint 를 따르지 않으므로 먼저 끈다
         self.event("land_cmd")
-        if not self.aborted:
-            self.streaming = False
-            await asyncio.sleep(0.2)
+        if self._touchdown_task is not None and not self._touchdown_task.done():
+            log("       [land] emergency touchdown in progress — waiting for it")
             try:
-                await self.drone.action.land()
-                log("       Land command sent.")
-            except Exception as e:
-                log("       Land command warning: {}".format(e))
-
-        start = self.now()
-        async for in_air in self.drone.telemetry.in_air():
-            elapsed = self.now() - start
-            fb = self.feedback_state()
-            n, e, u = self.mav_rel_position()
-            if fb:
-                log("       [land] t={:.1f}s in_air={} fb_rel=(N{:+.2f},E{:+.2f},U{:+.2f}) | mav_rel=(N{:+.2f},E{:+.2f},U{:+.2f})".format(
-                    elapsed, in_air, fb["rel_n"], fb["rel_e"], fb["rel_u"], n, e, u))
+                await asyncio.wait_for(asyncio.shield(self._touchdown_task), self.cfg.land_timeout_s + self.cfg.land_wait_timeout + 2.0)
+            except Exception:  # noqa: BLE001
+                pass
+        if not self.aborted and not self.landed_flag:
+            if self.cfg.land_mode == "offboard" and self.offboard_active and self.streaming:
+                await self.offboard_touchdown()
             else:
-                log("       [land] t={:.1f}s in_air={} feedback not ready | mav_rel=(N{:+.2f},E{:+.2f},U{:+.2f})".format(
-                    elapsed, in_air, n, e, u))
-            if not in_air:
-                log("       *** LANDED ***")
-                self.event("landed")
-                break
-            if elapsed > self.cfg.land_wait_timeout:
-                log("       [land] timeout, breaking")
-                self.event("land_timeout")
-                break
-            await asyncio.sleep(0.5)
+                self.streaming = False
+                await asyncio.sleep(0.2)
+                try:
+                    await self.drone.action.land()
+                    log("       Land command sent.")
+                except Exception as e:
+                    log("       Land command warning: {}".format(e))
+
+        if not self.landed_flag:
+            await self._wait_landed(self.cfg.land_wait_timeout)
 
         self.make_position_snapshot("land_end")
         await self.cancel_background_tasks()
@@ -1580,9 +1698,19 @@ class Vehicle(object):
         self.geofence.disarm()
         log("!!! EMERGENCY LAND TRIGGERED: {} !!!".format(reason))
         self.event("emergency_land", reason)
-        self.streaming = False
         self.aborted = True
         self.abort_reason = reason
+        if self.cfg.land_mode == "offboard" and self.offboard_active and self.streaming and self.px4_armed is not False:
+            # streamer 는 계속 돌린다 — body-velocity 하강 setpoint 로 접지 (PX4 LAND 는 이 기체에서 옆으로 달아난다)
+            self._touchdown_task = asyncio.ensure_future(self.offboard_touchdown(self.cfg.emergency_descent_mps, "emergency_touchdown"))
+            try:
+                landed = await self._touchdown_task
+            except Exception as e:  # noqa: BLE001
+                landed = False
+                log("       Emergency touchdown error: {!r}".format(e))
+            if landed:
+                return
+        self.streaming = False
         await asyncio.sleep(0.2)
         try:
             await self.drone.action.land()
@@ -1608,7 +1736,7 @@ class Vehicle(object):
     async def cancel_background_tasks(self):
         self.streaming = False
         self.monitoring = False
-        tasks = [self.stream_task, self.mav_task, self.mav_stream_task, self.mav_lag_task, self.armed_task, self.status_task, self.att_stream_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
+        tasks = [self.stream_task, self.mav_task, self.mav_stream_task, self.mav_lag_task, self.armed_task, self.in_air_task, self.status_task, self.att_stream_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
         for task in tasks:
             if task and not task.done():
                 task.cancel()
@@ -1676,6 +1804,7 @@ class Vehicle(object):
             "mav_lag_s": self.mav_lag_s, "mav_lag_known": self.mav_lag_known, "mav_updates": self.mav_update_count,
             "px4_armed_last": self.px4_armed,
             "uptime_s": self.uptime_s, "gyro_bias_dps": self.gyro_bias_dps, "accel_bias_ms2": self.accel_bias_ms2, "mav_yaw_updates": self.mav_yaw_count,
+            "land_mode": self.cfg.land_mode, "landed_flag": self.landed_flag,
             "yaw_ekf_vio_base_deg": self._yaw_disagree_base,
             "px4_msgs": [(round(t, 2), typ, txt) for (t, typ, txt) in list(self.px4_msgs)[-40:]],
             "results": self.results, "snapshots": self.snapshots,

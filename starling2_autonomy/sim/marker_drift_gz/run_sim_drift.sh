@@ -8,7 +8,7 @@
 # 비행은 starling-flight 컨테이너(Python 3.6.9 + MAVSDK 0.12 = 실기)에서 marker_drift_flight.py --sim 으로 한다.
 # 기록: $MD/logs/<시각>_iN/  sitl.log mission.log gt.csv(진실값) tags.csv(+_raw.jsonl) tag_detect.log + 비행 산출물(md_*.csv/json)
 # env: INSTANCE(2) WORLD(drift_banner) SIM(~/starling_sim) MD($SIM/marker_drift) FLIGHT_WS(/home/dronesim/workspace)
-#      CAM_TOPIC(/front_camera_real) TAG_HZ(5) TAG_SIZE(0.20) SPAWN(0,0,0.035,0,0,1.5708) RTF(1) MISSION_TIMEOUT(600 s)
+#      CAM_TOPIC(/front_camera_real) TAG_HZ(5) TAG_SIZE(0.20) SPAWN(0,0,0.035,0,0,3.1416 = 서향, 현수막 정면) RTF(1) MISSION_TIMEOUT(600 s)
 #      KEEP_SITL(0 = 끝나면 인스턴스 정지) NO_TAGS(0)
 #      INJECT('{}') vio_relay.py 오차 주입 JSON: rot_deg(VIO 프레임 회전 °), drift_n/drift_e(m/s), step_e/step_at(m, 이륙 후 s),
 #                   noise_pos_m/noise_vel_m_s. 산출물 inject.json 에 남는다.
@@ -21,7 +21,7 @@ FLIGHT_WS=${FLIGHT_WS:-/home/dronesim/workspace}          # starling-flight 안�
 case "$MD" in "$SIM"/*) ;; *) echo "!! MD=$MD 는 SIM=$SIM 아래여야 비행 컨테이너에서 보인다"; exit 2;; esac
 MD_IN_FLIGHT=$FLIGHT_WS/${MD#$SIM/}
 WORLD=${WORLD:-drift_banner}; MODEL=starling2_tof_$N
-MAVSDK_PORT=$((50051 + N)); TAG_PORT=$((14680 + N)); SPAWN=${SPAWN:-0,0,0.035,0,0,1.5708}
+MAVSDK_PORT=$((50051 + N)); TAG_PORT=$((14680 + N)); SPAWN=${SPAWN:-0,0,0.035,0,0,3.1416}   # v0.2.4: 서향 스폰 = 현수막(-x) 정면, 회전 없음. 종전 북향 1.5708 + --turn-deg -90
 MAVSDK_BIN=/usr/local/lib/python3.6/dist-packages/mavsdk/bin/mavsdk_server
 TS=$(date +%Y%m%d_%H%M%S)_i$N; OUT=$MD/logs/$TS; mkdir -p "$OUT"; OUT_IN_FLIGHT=$FLIGHT_WS/${OUT#$SIM/}
 step(){ echo; echo "=== [$(date +%H:%M:%S)] $*"; }
@@ -38,7 +38,7 @@ echo "$*" > "$OUT/args.txt"; echo "instance=$N world=$WORLD spawn=$SPAWN cam=${C
 # 1. 인스턴스 재기동 (starling2_tof: front_camera_real 1280x800 = 실기 tracking_front 화각)
 step "인스턴스 $N 정지"
 "$SC/stop_sitl_instance.sh" $N || { echo "!! 인스턴스 $N 정리 실패 (rc $?) — 재기동하지 않음. $V3/logs/stop_sitl_$N.log 확인"; exit 2; }
-step "인스턴스 $N 기동: world=$WORLD spawn=$SPAWN (북향 스폰 — drone_sim_gz 규칙)"
+step "인스턴스 $N 기동: world=$WORLD spawn=$SPAWN (기본 서향 = 현수막 정면, v0.2.4)"
 INJECT=${INJECT:-"{}"}   # vio_relay.py 오차 주입 JSON (기본 {} = 없음). 예: INJECT='{"drift_n":-0.02}' / '{"rot_deg":3}' / '{"step_e":0.3,"step_at":25}'
 docker exec -i starling-gz bash -c "cat > /tmp/wk_inject_$N.json" <<<"$INJECT"
 echo "inject=$INJECT" >> "$OUT/args.txt"; echo "$INJECT" > "$OUT/inject.json"

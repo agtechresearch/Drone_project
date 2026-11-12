@@ -76,7 +76,9 @@ class FakeDrone(object):
         self.armed = False
         self.in_air_flag = False
         self.landing = False
-        self.offboard = _Obj(start=self._offboard_start, set_position_ned=self._set_target)
+        self.offboard = _Obj(start=self._offboard_start, set_position_ned=self._set_target, set_velocity_body=self._set_vel_body)
+        self.vel_body = None            # (fwd, right, down, yawspeed) — offboard 접지 흉내
+        self._vb_t = None
         self.action = _Obj(arm=self._arm, land=self._land, disarm=self._disarm, kill=self._kill)
         self.core = _Obj(connection_state=self._conn)
         self.telemetry = _Obj(health=self._health, position_velocity_ned=self._pos, in_air=self._in_air,
@@ -128,6 +130,13 @@ class FakeDrone(object):
 
     async def _set_target(self, t):
         self.target = t
+        self.vel_body = None
+        self._step()
+
+    async def _set_vel_body(self, vb):
+        if self.vel_body is None:
+            self.cmd_log.append("vel_body_down" if vb.down_m_s > 0 else "vel_body")
+        self.vel_body = (vb.forward_m_s, vb.right_m_s, vb.down_m_s, vb.yawspeed_deg_s)
         self._step()
 
     def _step(self):
@@ -136,6 +145,19 @@ class FakeDrone(object):
         if self.landing:
             self.d += (0.0 - self.d) * 0.4
             if abs(self.d) < 0.03:
+                self.in_air_flag = False
+            return
+        if self.vel_body is not None and self.armed and not self.stuck:
+            tn = time.monotonic()
+            dt = 0.05 if self._vb_t is None else min(0.2, tn - self._vb_t)
+            self._vb_t = tn
+            fwd, right, down, _yr = self.vel_body
+            dn, de = util.body_delta_to_ned(fwd * dt, right * dt, self.yaw)
+            self.n += dn
+            self.e += de
+            self.d += down * dt
+            if self.d >= -0.02:
+                self.d = 0.0
                 self.in_air_flag = False
             return
         if self.target is None or self.stuck or not self.armed:   # arm 전에는 setpoint 를 따르지 않는다 (실기와 같게; v0.2.2 게이트 헤딩 검사)
@@ -331,7 +353,7 @@ def fast_cfg(**kw):
                 yaw_tol=3.0, yaw_stable_time=0.2, takeoff_speed=2.0, takeoff_hover_time=0.2,
                 preland_alt=0.2, preland_speed=2.0, preland_hover_time=0.2, pos_ok_hold_sec=0.1,
                 reach_pipe_timeout=3.0, csv_sample_sec=0.2, geofence_violation_sec=0.3,
-                vio_gate_window_s=0.4, vio_quiet_s=0.0, vio_bad_abort_s=0.3, est_disagree_s=0.3, mav_lag_calib_s=0.15, yaw_disagree_s=0.2, min_uptime_s=0.0, vio_min_rate_hz=0.0)
+                vio_gate_window_s=0.4, vio_quiet_s=0.0, vio_bad_abort_s=0.3, est_disagree_s=0.3, mav_lag_calib_s=0.15, yaw_disagree_s=0.2, min_uptime_s=0.0, vio_min_rate_hz=0.0, land_timeout_s=3.0, land_still_s=0.3)
     base.update(kw)
     return FlightConfig(**base)
 
@@ -343,6 +365,11 @@ def fast_params(**kw):
                 stop_mode="tag", start_tag=0, end_tag=10, tag_spacing=0.1, center=True, center_tol=0.03, max_extra=0.4)
     base.update(kw)
     return mdf.DriftParams(**base)
+
+
+def landed_cmd(d):
+    """접지 명령이 나갔는가: offboard body-velocity 하강(v0.2.5 기본) 또는 action.land()."""
+    return "vel_body_down" in d.cmd_log or "land" in d.cmd_log
 
 
 async def run_flight(drone, cfg, params, feed, out_dir):
@@ -547,9 +574,9 @@ try:
     ok("leg_end events (stop + settled x2)", sum(1 for e in rec.events if e["event"] == "leg_end") == 4 and any(e["event"] == "drift_reference" for e in rec.events))
 
     ok("sequence completed", seq["completed"] and not seq["aborted"])
-    ok("no exception, landed+disarmed", "land" in drone.cmd_log and "disarm" in drone.cmd_log and not v.aborted)
+    ok("no exception, landed+disarmed", landed_cmd(drone) and "disarm" in drone.cmd_log and not v.aborted)
     names = [r["name"] for r in v.results]
-    ok("stage order", names[:2] == ["takeoff", "aim_turn"] and "move_out" in names and "move_back" in names
+    ok("stage order (explicit --turn-deg -90)", names[:2] == ["takeoff", "aim_turn"] and "move_out" in names and "move_back" in names
        and names.index("move_out") < names.index("move_back") and names[-1] == "preland_descend", str(names))
     ok("all stages OK/STOPPED", all(r["status"] in ("OK", "STOPPED") for r in v.results), str([(r["name"], r["status"]) for r in v.results]))
     corr = [n for n in names if n.startswith("align_corr")]
@@ -607,7 +634,7 @@ try:
     names = [r["name"] for r in v.results]
     ok("align FAILED", seq["align"]["state"] == al.FAILED and seq["aborted"])
     ok("no lateral move after failure", "move_out" not in names, str(names))
-    ok("landed after failure", "land" in drone.cmd_log and "landed" in [e["event"] for e in rec.events])
+    ok("landed after failure", landed_cmd(drone) and "landed" in [e["event"] for e in rec.events])
     ok("align_failed event", "align_failed" in [e["event"] for e in rec.events])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
@@ -658,7 +685,7 @@ try:
 
     v, rec, seq = loop.run_until_complete(stuck_flight())
     ok("geofence aborted the flight", v.aborted and v.abort_reason and "GEOFENCE" in v.abort_reason, str(v.abort_reason))
-    ok("emergency land commanded", "land" in drone.cmd_log and "emergency_land" in [e["event"] for e in rec.events])
+    ok("emergency land commanded", landed_cmd(drone) and "emergency_land" in [e["event"] for e in rec.events])
     ok("move_out not OK", any(r["name"] == "move_out" and r["status"] != "OK" for r in v.results))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
@@ -782,7 +809,7 @@ try:
     v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(), cam, tmp))
     names = [r["name"] for r in v.results]
     ok("missing end tag: out leg MAX_DIST", seq["legs"] and seq["legs"][0]["status"] == "MAX_DIST", str(seq["legs"][:1]))
-    ok("missing end tag: landed in place, no return leg", seq["landed_in_place"] and "move_back" not in names and "land" in drone.cmd_log and not seq["completed"])
+    ok("missing end tag: landed in place, no return leg", seq["landed_in_place"] and "move_back" not in names and landed_cmd(drone) and not seq["completed"])
     ok("missing end tag: stopped within banner length + max_extra", v.results[names.index("move_out")]["cmd_dist"] <= 1.4 + 1e-6)
 
     # (d) 옛 방식(distance) 도 그대로 동작
@@ -909,7 +936,7 @@ try:
     ok("sim sequence completed", seq["completed"] and not seq["aborted"], str(seq.get("align")))
     ok("sim alignment via UDP feed", seq["align"]["state"] == al.ALIGNED and feedS.stats["frames"] > 5, str(feedS.stats))
     ok("sim yaw corrected toward the wall", near(util.angle_diff_deg(drone.yaw, 278.0), 0.0, 2.0), "yaw={:.1f}".format(drone.yaw))
-    ok("sim all stages OK/STOPPED, landed", all(r["status"] in ("OK", "STOPPED") for r in v.results) and "land" in drone.cmd_log,
+    ok("sim all stages OK/STOPPED, landed", all(r["status"] in ("OK", "STOPPED") for r in v.results) and landed_cmd(drone),
        str([(r["name"], r["status"]) for r in v.results]))
     ok("sim tag-stop legs via UDP, drift 5 % measured", len(seq["legs"]) == 2 and all(l["status"] == "STOPPED" for l in seq["legs"])
        and abs(seq["legs_settled"][0]["drift_along"] - seq["legs_settled"][0]["truth_along"] * 0.05 / 0.95) < 0.02 and seq["legs_settled"][0]["drift_along"] > 0.03,
@@ -1042,7 +1069,7 @@ try:
             d.vio_quality = -1
     drone.on_step = _lose
     v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
-    ok("in-flight VIO loss -> emergency land with VIO LOST reason", v.aborted and "VIO LOST" in (v.abort_reason or "") and "land" in drone.cmd_log, str(v.abort_reason))
+    ok("in-flight VIO loss -> emergency land with VIO LOST reason", v.aborted and "VIO LOST" in (v.abort_reason or "") and landed_cmd(drone), str(v.abort_reason))
     ok("vio_bad event recorded", any(e["event"] == "vio_bad" for e in rec.events))
 
     # (f) 비행 중 파이프 vs MAVSDK 불일치 → 비상 착륙
@@ -1055,7 +1082,7 @@ try:
             d.extra_pipe_offset = (0.0, 0.0, 0.6)          # 파이프 고도만 0.6 m 어긋남
     drone.on_step = _split
     v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
-    ok("in-flight estimator disagreement -> emergency land", v.aborted and "DISAGREEMENT" in (v.abort_reason or "") and "land" in drone.cmd_log, str(v.abort_reason))
+    ok("in-flight estimator disagreement -> emergency land", v.aborted and "DISAGREEMENT" in (v.abort_reason or "") and landed_cmd(drone), str(v.abort_reason))
 
     # (g) 이륙 직전 오프셋 → 이륙 거부 (게이트 뒤에 갑자기 흘렀을 때)
     drone = FakeDrone()
@@ -1214,9 +1241,9 @@ ok("read_uptime_s: None or float", s2vio.read_uptime_s() is None or isinstance(s
 
 tmp = tempfile.mkdtemp(prefix="s2f_")
 try:
-    # (a) 지상에서 EKF yaw 가 8 deg/s 로 흐르면 게이트 거부 (0.4 s 창 → 3.2 deg > 1.0)
+    # (a) 지상에서 EKF yaw 가 25 deg/s 로 흐르면 게이트 거부 (0.4 s 창 → ~8 deg ≫ 1.0; 8 deg/s 는 타이밍에 따라 2.5 deg 로 아슬아슬했다)
     drone = FakeDrone()
-    drone.ekf_yaw_drift_dps = 8.0
+    drone.ekf_yaw_drift_dps = 25.0
     err = None
     try:
         loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
@@ -1294,7 +1321,7 @@ try:
             d.ekf_yaw_drift_dps = 60.0
     drone.on_step = _drift_after_offboard
     v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
-    ok("in-flight EKF-vs-VIO heading divergence -> emergency land", v.aborted and "HEADING DISAGREEMENT" in (v.abort_reason or "") and "land" in drone.cmd_log,
+    ok("in-flight EKF-vs-VIO heading divergence -> emergency land", v.aborted and "HEADING DISAGREEMENT" in (v.abort_reason or "") and landed_cmd(drone),
        "%s %s" % (v.abort_reason, drone.cmd_log[-3:]))
     ok("heading base recorded at offboard start", v.summary_dict()["yaw_ekf_vio_base_deg"] is not None)
 
@@ -1311,6 +1338,73 @@ try:
     except vehicle.PreflightAbort as e:
         err = e
     ok("gate FAIL when no EKF yaw samples (dead attitude feed)", err is not None and "no EKF yaw samples" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+    # (e0) 기본 turn_deg 0 → aim_turn 단계 없음, settle 호버 뒤 바로 진행 (2026-11-12 정면 이륙)
+    drone = FakeDrone()
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance", turn_deg=0.0), None, tmp))
+    _names = [e["detail"] for e in rec.events if e["event"] == "stage_start"]
+    ok("turn_deg 0: no aim_turn stage, flight completes", seq["completed"] and "aim_turn" not in _names and "post_takeoff_settle" in " ".join(
+        str(e.get("detail", "")) for e in rec.events) or (seq["completed"] and "aim_turn" not in _names), str(_names[:4]))
+    ok("DriftParams default turn_deg is 0", mdf.DriftParams().turn_deg == 0.0)
+
+    # (t1) v0.2.5 접지: 정상 비행은 PX4 LAND 없이 body-velocity 하강으로 접지, action.land 호출 없음
+    drone = FakeDrone()
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    _ev = [e["event"] for e in rec.events]
+    ok("offboard touchdown: completed, landed, no action.land", seq["completed"] and v.landed_flag and "vel_body_down" in drone.cmd_log and "land" not in drone.cmd_log
+       and "touchdown_start" in _ev and "landed" in _ev and not drone.in_air_flag, "%s %s" % (drone.cmd_log[-4:], v.landed_flag))
+    # (t2) --land-mode px4 → 종전 action.land
+    drone = FakeDrone()
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(land_mode="px4"), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("land_mode px4: action.land used", seq["completed"] and "land" in drone.cmd_log and "vel_body_down" not in drone.cmd_log, str(drone.cmd_log[-4:]))
+    # (t3) 비상 착륙도 body-velocity 접지 (VIO 상실)
+    drone = FakeDrone()
+
+    def _lose_vio(d):
+        if d.vehicle is not None and d.vehicle.offboard_active and d.d < -0.3:
+            d.vio_quality = -1
+    drone.on_step = _lose_vio
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("emergency: body-velocity touchdown, landed, no action.land", v.aborted and "VIO LOST" in (v.abort_reason or "") and "vel_body_down" in drone.cmd_log
+       and "land" not in drone.cmd_log and not drone.in_air_flag and v.landed_flag, "%s %s" % (v.abort_reason, drone.cmd_log[-4:]))
+    # (t4) 접지 감지가 안 되면 PX4 LAND 폴백
+    drone = FakeDrone()
+    drone.stuck_after_vel = True
+
+    def _stick(d):
+        if d.vel_body is not None and getattr(d, "stuck_after_vel", False):
+            d.stuck = True            # 하강 명령을 무시 → 타임아웃 → action.land 폴백 (landing 흉내는 _land 가 처리)
+    drone.on_step = _stick
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("touchdown timeout -> PX4 LAND fallback", "touchdown_timeout" in [e["event"] for e in rec.events] and "land" in drone.cmd_log, str(drone.cmd_log[-4:]))
+
+    # (t5) v0.2.6: 접지 뒤 바닥에서 VIO 가 끊겨도 비상 착륙이 다시 발동하지 않는다; 접지 판정은 2 s 안
+    drone = FakeDrone()
+
+    def _vio_dies_on_ground(d):
+        if d.vehicle is not None and d.vehicle.landed_flag:
+            d.vio_quality = -1
+    drone.on_step = _vio_dies_on_ground
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    _evn = [e["event"] for e in rec.events]
+    _t_start = [e["mono_time"] for e in rec.events if e["event"] == "touchdown_start"]
+    _t_land = [e["mono_time"] for e in rec.events if e["event"] == "landed"]
+    ok("post-landing VIO loss does not trigger emergency; completed", seq["completed"] and not v.aborted and "emergency_land" not in _evn, str(_evn[-6:]))
+    ok("touchdown declared within 2 s of start", bool(_t_start and _t_land) and 0 < (_t_land[0] - _t_start[0]) < 2.0,
+       "%.2f s" % ((_t_land[0] - _t_start[0]) if (_t_start and _t_land) else -1))
+    ok("in_air monitor fed", v.in_air_latest is not None)
+    # (t6) disarm 거부 시 강제 disarm(kill) 로 모터 정지
+    drone = FakeDrone()
+    _orig_disarm = drone.action.disarm
+
+    async def _refuse_disarm():
+        if drone.in_air_flag or drone.vel_body is not None:
+            raise RuntimeError("Disarm rejected: not landed")
+        await _orig_disarm()
+    drone.action.disarm = _refuse_disarm
+    drone.refuse_first = True
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("touchdown: disarm or force-disarm issued right after landed", seq["completed"] and ("disarm" in drone.cmd_log or "kill" in drone.cmd_log), str(drone.cmd_log[-4:]))
 
     # (e) 정상 기체: 통과, 요약에 yaw 샘플 수
     drone = FakeDrone()

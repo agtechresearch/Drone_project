@@ -114,6 +114,49 @@ def wrap180(a):
     return (a + 180.0) % 360.0 - 180.0
 
 
+_NAV_STATE = None
+_BAD_FLAGS = []
+
+
+def px4_preflight_and_ekf():
+    """(pre_flight_checks_pass or None, {ratio_name: value}, err)"""
+    txt, err = px4_listener("vehicle_status")
+    pfc = None
+    nav = None
+    if txt is not None:
+        for l in txt.splitlines():
+            if l.strip().startswith("pre_flight_checks_pass:"):
+                pfc = l.split(":", 1)[1].strip() == "True"
+            if l.strip().startswith("nav_state:"):
+                try:
+                    nav = int(l.split(":", 1)[1].strip())
+                except ValueError:
+                    pass
+    # 조종기가 Offboard(14)에 있으면 setpoint 가 없어 pre_flight_checks_pass 가 False 인 게 정상 → 추정기 플래그로 대신 본다
+    bad_flags = []
+    txt3, _ = px4_listener("failsafe_flags")
+    if txt3 is not None:
+        for l in txt3.splitlines():
+            ls = l.strip()
+            for k in ("local_position_invalid", "local_velocity_invalid", "local_altitude_invalid", "attitude_invalid", "angular_velocity_invalid"):
+                if ls.startswith(k + ":") and ls.endswith("True"):
+                    bad_flags.append(k)
+    global _NAV_STATE, _BAD_FLAGS
+    _NAV_STATE, _BAD_FLAGS = nav, bad_flags
+    txt2, err2 = px4_listener("estimator_status")
+    ratios = {}
+    if txt2 is not None:
+        for l in txt2.splitlines():
+            ls = l.strip()
+            for k in ("vel_test_ratio", "pos_test_ratio", "hgt_test_ratio", "hdg_test_ratio"):
+                if ls.startswith(k + ":"):
+                    try:
+                        ratios[k] = float(ls.split(":", 1)[1].strip())
+                    except ValueError:
+                        pass
+    return pfc, ratios, (err or err2)
+
+
 def px4_ev_quality():
     try:
         out = subprocess.check_output(["px4-listener", "vehicle_visual_odometry", "1"], stderr=subprocess.DEVNULL, timeout=5)
@@ -135,7 +178,7 @@ def main():
     ap.add_argument("--quiet-sec", type=float, default=60.0)
     ap.add_argument("--min-quality", type=int, default=50)
     ap.add_argument("--min-features", type=int, default=8, help="2026-11-12: 6 개 지점에서 이륙 순간 VIO 상실 → 천장 충돌")
-    ap.add_argument("--min-rate", type=float, default=20.0, help="voxl-inspect-vio 출력률 하한 Hz (정상 30)")
+    ap.add_argument("--min-rate", type=float, default=10.0, help="voxl-inspect-vio 출력률 하한 Hz (특징점 많으면 15 Hz 가 정상, 0 개면 30 Hz)")
     ap.add_argument("--max-accel-bias", type=float, default=0.3, help="EKF 가속도계 바이어스 축별 상한 m/s² (PX4 한계 0.4; 0 = 끔)")
     ap.add_argument("--max-drift", type=float, default=0.03)
     ap.add_argument("--min-uptime", type=float, default=120.0, help="부팅 뒤 이 초 전이면 FAIL (0 = 끔)")
@@ -224,6 +267,19 @@ def main():
 
     q, err = px4_ev_quality()
     print("[px4] vehicle_visual_odometry.quality = {}{}".format(q, "" if err is None else " ({})".format(err)))
+    pfc, ratios, perr = px4_preflight_and_ekf()
+    print("[px4] pre_flight_checks_pass = {}  EKF test ratios: {}".format(
+        pfc, " ".join("{} {:.2f}".format(k.replace("_test_ratio", ""), v) for k, v in sorted(ratios.items())) or "n/a"))
+    if _BAD_FLAGS:
+        fails.append("PX4 estimator flags invalid: {} — reboot at the takeoff spot".format(", ".join(_BAD_FLAGS)))
+    elif pfc is False and _NAV_STATE == 14:
+        print("[px4] (RC is in OFFBOARD and no setpoints yet -> pre_flight_checks_pass False is expected; estimator flags OK)")
+    elif pfc is False:
+        fails.append("PX4 pre-flight checks FAIL in nav_state {} (commander refuses to arm; check QGC messages) — reboot at the takeoff spot".format(_NAV_STATE))
+    bad = [k for k, v in ratios.items() if v > 0.5]
+    if bad:
+        fails.append("EKF innovation test ratio > 0.5: {} (COM_ARM_EKF_* limit; estimator inconsistent with VIO) — reboot".format(
+            ", ".join("{} {:.2f}".format(k, ratios[k]) for k in bad)))
     if q is not None and q < 1:
         fails.append("PX4 sees EV quality {}".format(q))
 

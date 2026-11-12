@@ -193,7 +193,7 @@ Drone_project/starling2_autonomy/
     ├── test_mpa_tag_detections.py     태그 검출 파서 49항목 검증
     ├── test_tag_align.py              태그 정렬 측정·컨트롤러 74항목 검증 (가짜 카메라·가짜 기체)
     ├── test_marker_drift.py           마커 드리프트 파이프라인 70항목 검증 (venv 필요)
-    ├── test_s2flight.py               s2flight 패키지 200항목(VIO 게이트·감시·불일치·이륙 거부 포함): 태그 정지 시퀀스(FakeBannerCamera) 포함, 단위 + 가짜 MAVSDK·가짜 벽 카메라로 실험 시퀀스 전체 + SITL 모드(--sim, UDP 태그)
+    ├── test_s2flight.py               s2flight 패키지 210항목(VIO 게이트·감시·불일치·이륙 거부 포함): 태그 정지 시퀀스(FakeBannerCamera) 포함, 단위 + 가짜 MAVSDK·가짜 벽 카메라로 실험 시퀀스 전체 + SITL 모드(--sim, UDP 태그)
     └── marker_drift/                  docs/09 후처리 패키지: coverage·calibrate·detect·noise·analyze·compare
         ├── README.md                  사용법·좌표계·손 촬영 검증 절차
         └── layouts/lab_default.yaml   기본 마커 배치 (설치 후 실측값으로 갱신)

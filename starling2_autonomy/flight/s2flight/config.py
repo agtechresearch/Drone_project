@@ -27,6 +27,15 @@ class FlightConfig(object):
     preland_hover_time = 2.0
     skip_preland = False
     land_wait_timeout = 15.0
+    # 접지 (v0.2.5): PX4 LAND 모드는 이 기체(GPS 없음, 전역 기준 없음)에서 착륙점을 잃고 옆으로 달아났다
+    # (11-10 2차 사고, 11-12 점검 비행: position_setpoint_triplet lat/lon 0, 1 s 만에 1.3 m/s). offboard body-velocity 하강으로 접지한다.
+    land_mode = "offboard"           # offboard = body-velocity 하강 접지 (기본) | px4 = action.land() (종전)
+    land_descent_mps = 0.4           # 정상 접지 하강 속도 (0.25 m 에서 ~0.6 s; 느리면 바닥 근처에서 위치가 흐른다)
+    emergency_descent_mps = 0.4      # 비상 접지 하강 속도
+    land_timeout_s = 8.0             # 이 시간 안에 접지 감지가 없으면 PX4 LAND 로 폴백
+    land_touch_u_m = 0.06            # 피드백 고도가 이보다 낮고
+    land_still_du_m = 0.01           # 0.25 s 간 변화가 이보다 작은 채
+    land_still_s = 0.8               # 이 시간 지속되면 접지로 본다 (land detector 보조; v0.2.6 부터 0.2 s 폴링 창)
     min_command_alt = 0.15
 
     # 스트림 / 감시
@@ -72,7 +81,7 @@ class FlightConfig(object):
     static_yaw_drift_deg = 1.0       # 게이트: 게이트 창(vio_gate_window_s) 동안 지상 정지인데 EKF yaw 가 이보다 변하면 거부
     gyro_bias_max_dps = 1.0          # 게이트: EKF 자이로 바이어스(px4-listener estimator_sensor_bias) 축별 |값| 상한 deg/s. 0 = 끔
     accel_bias_max_ms2 = 0.3         # 게이트: EKF 가속도계 바이어스 축별 |값| 상한 m/s² (PX4 한계 0.4; 2026-11-12 천장 충돌 때 0.40). 0 = 끔
-    vio_min_rate_hz = 20.0           # 게이트: 게이트 창 VIO 상태 출력률 하한 (정상 30 Hz; 특징점 부족 지점에서 15~25 Hz). 0 = 끔
+    vio_min_rate_hz = 10.0           # 게이트: 게이트 창 VIO 상태 출력률 하한. OpenVINS 는 특징점이 많으면 매 2 프레임(15 Hz)로 떨어지는 게 정상(2026-11-12 실측: 특징점 19 → 15 Hz, 0 → 30 Hz) → 정지(stall)만 잡는다. 0 = 끔
     yaw_disagree_deg = 10.0          # 비행 중: EKF yaw - VIO yaw 가 offboard 시작 시점 대비 이만큼 벌어지면 착륙. 0 = 끔
     yaw_disagree_s = 0.5             # 비행 중: 위 조건 지속 시간
 
@@ -200,6 +209,10 @@ class FlightConfig(object):
         s.add_argument("--mav-rate-hz", dest="mav_rate_hz", type=float, default=FlightConfig.mav_rate_hz)
         s.add_argument("--mav-lag-warn-sec", dest="mav_lag_warn_s", type=float, default=FlightConfig.mav_lag_warn_s)
         s.add_argument("--mav-lag-abort-sec", dest="mav_lag_abort_s", type=float, default=FlightConfig.mav_lag_abort_s)
+        s.add_argument("--land-mode", dest="land_mode", choices=("offboard", "px4"), default=FlightConfig.land_mode,
+                       help="접지 방식: offboard body-velocity 하강(기본, PX4 LAND 미사용) | px4 action.land()")
+        s.add_argument("--land-descent", dest="land_descent_mps", type=float, default=FlightConfig.land_descent_mps, help="접지 하강 속도 m/s")
+        s.add_argument("--land-timeout-sec", dest="land_timeout_s", type=float, default=FlightConfig.land_timeout_s)
         s.add_argument("--px4-msg-quiet-sec", dest="px4_msg_quiet_s", type=float, default=FlightConfig.px4_msg_quiet_s,
                        help="최근 이 시간 안 PX4 'Preflight Fail' 등 메시지가 있으면 arm 거부. 0 = 끔")
         s.add_argument("--min-uptime-sec", dest="min_uptime_s", type=float, default=FlightConfig.min_uptime_s,
