@@ -85,11 +85,12 @@ sleep 4
 #     (VIO_FAIL_JSON 기본 {"quality": -1, "state": "FAILED", "features": 0}; VIO_RECOVER_AFTER=<s> 면 그 뒤 복구). 2026-11-10 사고 대책 검증용.
 VIO_FILE="$OUT/sim_vio.json"; echo "{}" > "$VIO_FILE"
 echo "vio_fail_at=${VIO_FAIL_AT:-}" >> "$OUT/args.txt"
+VIO_FAIL_JSON=${VIO_FAIL_JSON:-'{"quality": -1, "state": "FAILED", "features": 0}'}   # 커스텀 JSON 은 변수로 (${v:-{...}} 안의 } 가 하나 더 붙던 버그, 2026-11-12)
 if [ -n "${VIO_FAIL_AT:-}" ]; then
   # 기준 시각: VIO_FAIL_FROM=offboard(기본, 'Offboard active!' 가 mission.log 에 찍힌 뒤) | start(비행 스크립트 기동 시점)
   ( if [ "${VIO_FAIL_FROM:-offboard}" = "offboard" ]; then
       for i in $(seq 1 600); do grep -q "Offboard active" "$OUT/mission.log" 2>/dev/null && break; sleep 0.5; done; fi
-    sleep "$VIO_FAIL_AT"; echo "${VIO_FAIL_JSON:-{\"quality\": -1, \"state\": \"FAILED\", \"features\": 0}}" > "$VIO_FILE"; echo "[sim] VIO FAIL injected at +${VIO_FAIL_AT}s after ${VIO_FAIL_FROM:-offboard}" >> "$OUT/mission.log"
+    sleep "$VIO_FAIL_AT"; echo "$VIO_FAIL_JSON" > "$VIO_FILE"; echo "[sim] VIO FAIL injected at +${VIO_FAIL_AT}s after ${VIO_FAIL_FROM:-offboard}" >> "$OUT/mission.log"
     if [ -n "${VIO_RECOVER_AFTER:-}" ]; then sleep "$VIO_RECOVER_AFTER"; echo "{}" > "$VIO_FILE"; echo "[sim] VIO recovered" >> "$OUT/mission.log"; fi ) &
 fi
 
