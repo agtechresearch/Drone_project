@@ -4,9 +4,10 @@
 설계서 `docs/09_marker_drift_experiment_plan.md` 와 랩미팅 요약 `_brief.md` 는 "무엇을 할 것인가", 이 문서는 "실제로 무엇이 일어났는가".
 새 항목은 **§1 진행 기록** 끝에 날짜로 추가하고, 코드가 바뀌면 §2 패치노트, 문제를 겪으면 §3 트러블슈팅에도 한 줄씩 남긴다.
 
-**현재 상태 (2026-11-10 밤):** 실기 사고 2건(1차 이륙 중 VIO 끊김·추측항법 상승 / 2차 MAVSDK 지연에 의한 가짜 불일치 착륙 + 추락 후 미재부팅). **비행 금지.**
-v0.2.1 완성(VIO 게이트·감시, MAVSDK 지연 수정·감시, 외부 disarm 감시, PX4 메시지 게이트, 시뮬 MAVSDK 모니터 수정) — 단위테스트 181/181, SITL 통과, **기체 배포 대기**(기체 꺼짐).
-남은 관문: 기체 켜기 → v0.2.1 배포 → 외관 점검 → **장소 검증(vio_check 들고 이동)** → 재부팅 상태에서 §4a 절차 → 사용자 "시작" → 0.4 m 점검 비행.
+**현재 상태 (2026-11-12 오후):** 11-12 수동 비행(Position)에서 또 좌측 밀림·좌회전 → 원인 확정: **EKF 자이로 z 바이어스 -3.5 °/s**(부팅 31 s 만에 arm, 지상 정지에서도 EKF 헤딩이 3.5 °/s 회전). 기체·모터 정상.
+v0.2.2b 배포됨(정지 헤딩 드리프트·부팅 경과·EKF 자이로 바이어스·yaw 샘플 0 게이트 + 비행 중 EKF-VIO yaw 발산 착륙) — 단위테스트 195/195, SITL A11 완료·V7 헤딩 발산 착륙 확인.
+**다음 비행은 사용자 "시작" 뒤 0.4 m 점검 비행부터.** mavsdk_server·태그 검출기 기동됨(05:51 UTC).
+남은 관문: 기체 재부팅 → 이륙 지점에 둔 채 손대지 않고 2~3 분 → `vio_check.py` PASS(헤딩 0 °/s·바이어스 < 1 °/s) → 사용자 "시작" → 0.4 m 점검 비행. `EKF2_EV_CTRL 15` 적용됨(05:30 UTC, 재부팅).
 
 ---
 
@@ -198,17 +199,73 @@ VIO 불안정(BAD/리셋)은 1차 충돌 전 12:22 부터 있었다 → **오늘
 - `capture_initial_mavsdk_position` 도 쉬지 않고 소화(시간 창).
 - 절차: 비행 전 **장소 검증** — 후보 지점에서 `vio_check.py --seconds 30` 을 기체를 들고 천천히 움직이며 실행, 이동 중에도 quality ≥ 50·features ≥ 10 유지되는 곳만 이륙 지점. 모든 곳에서 무너지면 카메라 점검.
 
+### 2026-11-12 (오후) — **수동 비행 좌측 밀림·좌회전 재현 → EKF 자이로 바이어스 -3.5 °/s 확정, v0.2.2**
+- 사용자 보고: 기체를 켜고 수동(Position)으로 띄우니 또 좌측으로 밀리고 천천히 좌회전. 비행 없음(코드·분석만). 기체 IP .18 로 변경.
+- 로그 `sess180/log100.ulg`(7.3 MB): **arm = 부팅 31 s** (이전 비행들은 114·811·2124 s). POSCTL 38 s, 이륙 34 s.
+  - 원시 자이로 z 적분 -2.3°(기체는 거의 안 돌았다) vs **EKF yaw +116.5°(+3.5 °/s)**. EKF `gyro_bias[2]` 첫 샘플 -3.04 → -3.46 °/s (11-05 +0.05, 11-10 -0.13, 11-04 -0.03).
+    `vehicle_angular_velocity` z 평균 +3.34 °/s = 원시 -0.10 - 바이어스(-3.46): 컨트롤러는 가만히 있는 기체가 돈다고 믿었다.
+  - EKF 위치 변화 5.4 m vs VIO 0.3 m, `ev_hpos` 이노베이션 최대 2.7 m → 틀어진 헤딩으로 EV 속도를 융합해 위치가 달아나고 기체가 그걸 쫓아 밀림. 조종자는 오른쪽 스틱 74 % 시간 — 보상 입력.
+  - 모터 스프레드 7 %(11-05 10 %), 자세 평균 roll -0.17° → **기체 비대칭 아님**. 캘리브레이션 파라미터(CAL_GYRO0_*OFF, CAL_ACC0_*OFF) 11-04~11-12 동일 → 저장된 캘 문제 아님.
+  - `EKF2_EV_CTRL = 7`(pos+vel+hgt, **yaw 비트 꺼짐**), `EKF2_MAG_TYPE 5` → `cs_yaw_align 0`, `cs_ev_yaw 0`: EKF 헤딩은 자이로 적분뿐이라 바이어스 오차가 그대로 헤딩 드리프트가 된다.
+    ModalAI 실내 VIO 프리셋은 `EKF2_EV_CTRL 15`(yaw 융합 포함) — 포럼/문서 근거 §3. 변경은 기체 설정이라 승인 필요(미적용).
+- 실시간 확인(부팅 10 분, 지상 정지, cs_in_air 0): `estimator_sensor_bias.gyro_bias[2] = -0.0616 rad/s (-3.53 °/s)`, 10 s 동안 heading -1.015 → -0.383 rad (**+3.6 °/s**). VIO yaw 는 멈춰 있음.
+  부팅 30 분 뒤 재확인: 바이어스 +0.08 °/s, 헤딩 드리프트 0 — 그 사이 기체가 옮겨져(VIO 원점 리셋) EV 속도 융합으로 바이어스가 재학습된 것으로 보임. **움직여야만 관측되는 상태라 신뢰 불가 → 게이트로 막는다.**
+- 가설: 전원을 켠 뒤 OpenVINS 초기화(부팅 +4 s GOOD)·EKF 초기화 중에 기체를 들고 옮기거나 돌린 뒤 바로 arm → EV 위치/속도 이노베이션이 자이로 바이어스 상태로 흡수. 로그가 arm 부터라 arm 전 31 s 는 미확인.
+- 조치: **v0.2.2**(패치노트) + 절차 변경: 전원은 이륙 지점에 둔 채 켜고 2~3 분 손대지 않는다, `vio_check.py` 가 헤딩·바이어스·uptime 을 판정. v0.2.2 기체 배포·`vio_check` 가 실제 고장 상태에서 FAIL(-3.54 °/s) 확인.
+- 회수: `20261110_122731_T1`(1차 사고 실제 콘솔), voxl-logger `log0003` csv(ov·imu·local_position; 이미지 제외) → `sim_logs/marker_drift/real_20261110/`. 오늘 로그 → `real_20261112/px4/sess180_log100.ulg`.
+- 분석 스크립트(스크래치): `ulog_yawdrift.py`(원시 자이로 vs EKF yaw·바이어스·EV 비교), `ulog_params.py`(캘/EKF 파라미터·플래그 비교).
+
+### 2026-11-12 (저녁) — **3차 사고: 수동 비행 천장 충돌** (EKF2_EV_CTRL 15 적용 뒤; 자동 비행 아님)
+- 흐름: `EKF2_EV_CTRL 15` 적용·재부팅 → vio_check 3회 FAIL(특징점 6, 정지 위치 드리프트 0.07~0.20 m, 출력 15~25 Hz) → 사용자가 수동(Position) 비행 →
+  ① `sess181/log101.ulg`(80 s): 이륙 뒤 10 s 간 VIO 유효/무효 깜빡임 → EKF 속도 ±0.16 m/s 요동("토일렛 보울링"), VIO 재초기화로 EKF yaw 10.8° 리셋, 11 s 뒤 회복.
+  비행 중 "Preflight Fail: High Accelerometer Bias" 3회 — EKF 가속도계 z 바이어스 0.19 → 0.395 m/s²(한계 0.4). 재부팅 없이 ②로.
+  ② `sess181/log102.ulg`(17 s): 이륙 2 s 전 VIO quality 73→22→-1 → EV 융합 중단·추측항법, z 리셋(-0.40→+0.04). 이륙(거리 센서 0→1.5→2.5 m)하는 동안 EKF 는
+  **vz +0.4 → +6.5 m/s '하강'**(가속도계 바이어스 0.4 m/s² 적분) → Position 제어가 추력 상승. +2.5 s `invalid setpoints` → PX4 failsafe **blind land** 가 '추락 중' 추정 위에서
+  하강을 시도해 추력을 더 올림 → 천장(2.5 m) 충돌, +13 s 킬 스위치. 종료 시 EKF z +23 m.
+- 원인: (근본) 이륙 지점 전방 무늬 없음 → 특징점 6 → 이륙 순간 VIO 상실(저널 6 분간 GOOD→BAD→재초기화 3회). (증폭) 직전 비행이 남긴 가속도계 바이어스 0.4 m/s² 를 재부팅 없이 가져감
+  (11-10 2차 사고와 같은 함정; 자동 비행이었다면 v0.2.1 `px4_msg` 게이트가 'Accelerometer Bias' 경고로 arm 거부). 수동 비행에는 게이트가 없다.
+- 기체: 모터 편차·자세 정상. `EKF2_EV_CTRL 15` 는 정상 동작(①에서 헤딩이 VIO 에 재정렬). 사고 로그 → `sim_logs/marker_drift/real_20261112/px4/{manual2_latest,ceiling_crash}.ulg`.
+- 조치: **v0.2.3** — 게이트에 EKF 가속도계 바이어스 ≤ 0.3 m/s², VIO 특징점 ≥ 8(종전 3), VIO 출력률 ≥ 20 Hz 추가; vio_check 동일. 절차: vio_check FAIL 이면 **수동 비행도 하지 않는다**,
+  이륙 지점에 무늬(태그판·상자·바닥 종이) 확보, 어떤 비행이든 끝나면 다음 비행 전 vio_check 재실행(바이어스·경고 확인), 충돌·경고 뒤 재부팅.
+- 분석 스크립트(스크래치): `ulog_bowl.py`(이륙 뒤 1 s 타임라인: EKF/EV yaw·품질·위치·속도·이노베이션), `ulog_ceiling.py`(z·vz·EV z·거리 센서·추력·setpoint 0.25 s).
+
 ### (다음 항목을 여기에 날짜로 추가)
 - [x] 기체: `tag_locations.conf` 0.20, `skip_n_frames` 1, voxl-tag-detector 기동 (2026-11-10 승인·적용)
 - [x] 손 검출 시험 (2026-11-10): x 오른쪽 +, σ_yaw 0.19° → `--align-tol 1.0`
-- [ ] v0.2.1 배포(`tools/deploy_pkg.sh -y` + `tools/deploy_pkg.sh -y flight/tools_onboard/vio_check.py`) → 외관 점검 → 장소 검증 → 재부팅 후 §4a → 사용자 "시작" → 0.4 m 점검 비행 → 태그 모드
-- [ ] 다음 접속 때 회수: `marker_drift_logs/20261110_122731_T1`(1차 사고 실제 콘솔), voxl-logger `log0003`
+- [x] v0.2.1 → v0.2.2 배포 (2026-11-12), `122731_T1`·`log0003` csv 회수
+- [ ] 3차 사고 뒤: 전원 끄고 외관 점검(프롭·암·상판·렌즈) → **이륙 지점 무늬 보강**(태그 10 판 1~2 m 앞, 바닥 종이) → 전원 투입 3 분 정치 → `vio_check.py` PASS(features ≥ 8, rate ≥ 20 Hz, pos drift ≤ 3 cm) → v0.2.3 배포 확인 → 사용자 "시작" → 0.4 m 점검 비행 → 태그 모드
+- [x] `EKF2_EV_CTRL 7 → 15` (2026-11-12 05:30 UTC, 사용자 승인 "15로 변경해줘"). 변경 전 7 확인, 백업 `/data/px4/param/parameters.bak.20261112-053038`, `px4-param set/save` 뒤 재부팅.
+  근거: 기체는 `indoor_vio_missing_gps.params` 프리셋과 EV_CTRL 한 항목만 달랐다(인계 덤프 10-27 부터 7). 되돌리기: `px4-param set EKF2_EV_CTRL 7; px4-param save; reboot`.
+  적용 뒤 확인 항목: `px4-listener estimator_status_flags` 의 `cs_ev_yaw True`, `cs_yaw_align True`; vio_check 의 EKF-VIO yaw 오프셋이 0 근처.
 - [ ] 실험장: 태그 0~9 부착 마무리(좌상단 꼭짓점 기준 500 mm, §4.1 표), 통로 B 폭(140 cm?), 상단열 C(같은 ID 0~9)
 - [ ] 태그 크기 20 cm 확인
 
 ---
 
 ## 2. 패치노트
+
+### v0.2.3 — 가속도계 바이어스·특징점·출력률 게이트 (2026-11-12 저녁, 3차 사고 뒤)
+- `vio.py`: `parse_px4_accel_bias`, `read_px4_sensor_bias`(자이로+가속도계; `read_px4_gyro_bias` 는 래퍼), `VioHistory.summarize` 에 `rate_hz`.
+- 게이트 ⑨ 확장: 가속도계 바이어스 축별 ≤ `accel_bias_max_ms2`(0.3) ; ② 특징점 하한 `vio_min_features` 3 → **8** ; ⑩ VIO 출력률 ≥ `vio_min_rate_hz`(20, 실기만). CLI `--accel-bias-max --vio-min-rate-hz`.
+- `vio_check.py`: 가속도계 바이어스(`--max-accel-bias` 0.3)·출력률(`--min-rate` 20)·특징점 8 판정, FAIL 문구에 조치(무늬 보강) 명시.
+- 테스트 200/200 (+5: 가속도계 파서·rate_hz·특징점 6 거부·가속도계 0.395 거부·출력률 저하 거부). 가짜 기체 `vio_every_n` 로 출력률 저하 흉내.
+**검증**: 단위테스트 **200/200**. SITL A12 `20261112_154211_i2` 게이트 PASS → 완료(출력률 검사는 실기만). 기체 배포됨(충돌 뒤 재부팅 전).
+
+### v0.2.2 — EKF 헤딩 드리프트 방어 (2026-11-12 오후, 수동 비행 좌측 밀림 원인 확정 뒤)
+- `vio.py`: `voxl-inspect-vio` RPY 파싱(`rpy`, PX4 EV 와 같은 부호 — 실기에서 -9.9° = -9.9° 확인), `VioHistory` yaw 보관·`yaw_range`·`latest_yaw`, `yaw_range_deg`(wrap), `read_uptime_s`, `parse_px4_gyro_bias`/`read_px4_gyro_bias`(`px4-listener estimator_sensor_bias`).
+- `vehicle.py`: 연결 직후부터 `attitude_euler` 상시 스트림(실기; SITL 은 `sim_pose_task` 가 공급) → `mav_yaw_deg`. `capture_initial_yaw` 는 스트림 값을 샘플링(이중 구독 회피).
+  게이트 추가 ⑦ 창 동안 지상 정지 EKF yaw 변동 ≤ `static_yaw_drift_deg`(1.0°) ⑧ `/proc/uptime` ≥ `min_uptime_s`(120 s) ⑨ EKF 자이로 바이어스 축별 ≤ `gyro_bias_max_dps`(1.0).
+  비행 중 `_check_heading_disagreement`: offboard 시작 시 (EKF yaw − VIO yaw) 를 기준으로 잡고 `yaw_disagree_deg`(10°) 이상 `yaw_disagree_s`(0.5 s) 지속 → EMERGENCY LAND "HEADING DISAGREEMENT". sync.csv `yaw_ekf_vio_dev_deg`.
+- `config.py`: `--min-uptime-sec --static-yaw-drift-deg --gyro-bias-max-dps --yaw-disagree-deg --yaw-disagree-sec`.
+- `sim.py`: `sim_vio_task` 가 rpy(yaw = EKF yaw + 오버라이드 `yaw_offset_deg`) 를 낸다 → `VIO_FAIL_JSON='{"yaw_offset_deg": 30}'` 로 헤딩 발산 시나리오.
+- `tools_onboard/vio_check.py`: uptime·EKF 자이로 바이어스·창 동안 EKF 헤딩 드리프트(`--max-heading-drift` 0.3 °/s)·VIO yaw 범위·EKF-VIO 오프셋 출력, FAIL 시 "재부팅 후 2~3 분" 안내.
+- 테스트 194/194 (+13: 파서 rpy·yaw_range·VioHistory yaw·바이어스 파서 2·uptime·게이트 헤딩/uptime/바이어스 거부·비행 중 발산 착륙·기준 기록·정상 통과). 가짜 기체는 arm 전 setpoint 를 따르지 않도록 수정(실기와 동일).
+**v0.2.2b (같은 날 저녁)**: SITL V6 에서 게이트 EKF yaw 샘플이 0개인 채 PASS → 헤딩 검사가 무음으로 꺼져 있었다(초기 헤딩 캡처가 `attitude_euler` 를 따로 구독·종료하면
+뒤의 `sim_pose_task` 구독이 데이터를 못 받는 경쟁). 수정: ① yaw 샘플 0개면 게이트 FAIL("no EKF yaw samples") ② SITL 은 `sim_pose_task` 를 캡처 전에 띄우고, 캡처는 상시 공급(실기: 연결 직후 스트림)을
+기다렸다 샘플링(별도 구독 없음). `run_sim_drift.sh` 의 `VIO_FAIL_JSON` 커스텀 JSON 에 `}` 가 하나 더 붙던 셸 기본값 버그 수정. 테스트 195/195.
+**검증**: 단위테스트 **195/195**. 실기(비행 없음): 고장 상태에서 `vio_check` FAIL(-3.54 °/s), 정상화 뒤 heading 0.0004 rad/8 s; `EKF2_EV_CTRL 15` 뒤 EKF-VIO yaw 오프셋 -0.2°.
+SITL(v0.2.2b): A11 `20261112_144213_i2` 게이트 PASS(yaw 30 샘플) → 완료; V7 `20261112_144233_i3` offboard +15 s 에 VIO yaw 를 +30° 떼어 놓자
+**EMERGENCY LAND "HEADING DISAGREEMENT: EKF yaw drifted -30.0 deg vs VIO"** → 착륙. (V5·V6 는 각각 JSON 버그·yaw 샘플 0 으로 무효 — 트러블슈팅 참고.)
 
 ### v0.2.1 — MAVSDK 텔레메트리 지연 수정 (2026-11-10 오후, 2차 사고 대책)
 
@@ -406,6 +463,28 @@ V4 `20261110_225518_i3` offboard +20 s VIO 상실 → 0.5 s 뒤 EMERGENCY LAND �
   → 지오펜스·불일치 감시가 SITL 검증에서 꺼진 채 "통과" 로 보였다.
 - 조치: v0.2.1 구조 수정(위). 검증 기준에 **sync.csv `mav_updates` > 0, `mav_rel_u` 가 `fb_rel_u` 를 따라감** 을 추가. 같은 스트림을 두 곳에서 구독하지 말 것.
 
+**게이트가 'yaw drift … (0 samples)' 로 PASS — 헤딩 검사가 꺼진 채 통과 (2026-11-12 SITL V6)**
+- 증상: mission.log 게이트 줄에 `(0 samples)`, `[heading] EKF-VIO yaw offset …` 줄 없음, sync.csv 에 `yaw_ekf_vio_dev_deg` 열 없음. 같은 코드로 바로 전 실행(V5·A10)은 30 샘플.
+- 원인: `capture_initial_yaw` 가 `attitude_euler` 를 따로 구독하고 `aclose()` 한 뒤, 뒤에 시작한 `sim_pose_task` 의 같은 스트림 구독이 데이터를 못 받는 경우가 있다(MAVSDK-Python 0.12 이중 구독 문제의 변형, 타이밍 의존).
+- 조치: v0.2.2b — 샘플 0개면 게이트 FAIL, SITL 포즈 태스크를 캡처 전에 시작, 캡처는 상시 공급 값을 샘플링. 규칙: **감시 입력이 비어 있으면 통과가 아니라 실패**로 다룬다.
+
+**`VIO_FAIL_JSON` 으로 넣은 커스텀 JSON 이 안 먹음 (`{"yaw_offset_deg": 30}}`, 2026-11-12 SITL V5)**
+- 원인: `echo "${VIO_FAIL_JSON:-{\"quality\": …0}}"` — 기본값 안의 `}` 가 확장을 먼저 닫아, 변수가 설정돼 있으면 뒤 `}` 가 그대로 붙는다. 기본 JSON 일 때만 우연히 맞았다.
+- 조치: 기본값을 변수에 한 번 대입(`VIO_FAIL_JSON=${VIO_FAIL_JSON:-'…'}`) 뒤 `echo "$VIO_FAIL_JSON"`. 주입 결과는 산출물 폴더 `sim_vio.json` 으로 확인한다.
+
+**이륙하자마자 멈추지 않고 상승 → 천장 (2026-11-04, 11-10 1차, 11-12 3차 — 세 번 다 같은 기전)**
+- 기전: 이륙 순간 VIO 상실 → EKF 가 EV 높이 융합을 끊고 관성 추측항법 → 가속도계 바이어스 오차가 그대로 적분돼 '하강 중' 으로 추정 → Position/blind-land 제어가 추력을 올림.
+  바이어스가 이미 커져 있으면(직전 비행 'High Accelerometer Bias' 경고, 재부팅 안 함) 수 초 만에 수 m/s 가 된다(11-12: 10 s 에 4 m/s).
+- 판별: ulog `vehicle_local_position.vz` 가 이륙 중 양수(하강)로 커지는데 `distance_sensor.current_distance` 는 증가; `vehicle_visual_odometry.quality` -1; `estimator_status_flags.cs_inertial_dead_reckoning` 1.
+- 예방: 이륙 지점 특징점 ≥ 8·출력 30 Hz(vio_check), 비행 사이 바이어스 확인(accel ≤ 0.3 m/s²), 경고·충돌 뒤 재부팅. 조종자: 상승이 멈추지 않으면 즉시 **Manual(Stabilized) 로 내리고 스로틀을 줄인다** — Position 모드는 틀린 추정을 믿고 계속 올린다.
+
+**지상 정지인데 EKF 헤딩이 돈다 / 수동·Position 비행에서 한쪽으로 밀리며 천천히 회전 (2026-11-12)**
+- 증상: 기체는 가만히 있는데 `px4-listener vehicle_local_position` heading 이 초당 수 ° 변함; 비행하면 한쪽(이번엔 왼쪽)으로 밀리고 같은 쪽으로 천천히 yaw, 조종자가 계속 보상.
+- 원인: EKF2 자이로 z 바이어스 상태가 틀어짐(-3.5 °/s). 이 기체는 `EKF2_EV_CTRL 7`(yaw 비트 꺼짐)·자력계 없음이라 헤딩 보정원이 없고, 정지 상태에선 바이어스가 관측되지 않아 스스로 안 낫는다. 부팅 31 s 만에 arm 한 비행에서 발생.
+- 판별: `px4-listener estimator_sensor_bias -n 1` 의 `gyro_bias` 세 번째 값 ×57.3 (°/s) 이 1 넘으면 비정상; heading 두 번 읽어 변화율. `vio_check.py` 가 둘 다 본다. 모터 스프레드·자세 평균은 정상이므로 기체 탓으로 보지 말 것.
+- 조치: 재부팅 → 이륙 지점에 둔 채 2~3 분 손대지 않음 → `vio_check.py` PASS 뒤 비행. 코드 게이트 ⑦⑧⑨(v0.2.2) 가 거부한다. 근본 대책 후보: `EKF2_EV_CTRL 15`(VIO yaw 융합, ModalAI 실내 프리셋; 포럼: "yaw estimate will track VIO unless the Yaw bit in EKF2_EV_CTRL is off and EKF2_MAG_TYPE 0/5") — 승인 뒤 적용.
+- 근거: https://docs.modalai.com/flying-with-vio/ , https://forum.modalai.com/post/12384 , https://forum.modalai.com/post/22352
+
 **MAVSDK 위치가 몇 초 전 값이다 / 파이프와 MAVSDK 가 갈라진다 (2026-11-10 1·2차 사고)**
 - 증상: `_sync.csv` 에서 `mav_rel_*` 가 `fb_rel_*` 를 수 초 늦게 따라감. 실기 측정: 30 msg/s 입력, `sleep(0.05)` 루프 18.5 msg/s 소비, 지연 +0.41 s/s.
 - 원인: MAVSDK-Python 의 async 스트림은 소비가 느리면 버퍼링(드롭 아님). 메시지마다 sleep 하는 루프는 입력률보다 느리면 반드시 밀린다.
@@ -452,16 +531,18 @@ V4 `20261110_225518_i3` offboard +20 s VIO 상실 → 0.5 s 뒤 EMERGENCY LAND �
 ### 4a. 실기 비행 절차 (2026-11-10 사고 뒤 확정; 순서를 건너뛰지 않는다)
 
 ```bash
+# 0) 전원은 **이륙 지점에 둔 채** 켠다. 켠 뒤 2~3 분 손대지 않는다(옮기거나 돌리지 않는다). 추락·킬·충격 뒤엔 반드시 재부팅. (2026-11-12: 부팅 31 s arm → EKF 자이로 바이어스 -3.5 °/s)
 ssh starling2_lab                                              # IP 바뀌면 메모리 절차로 스윕 (hostkey IIh6B2Siw…)
 pgrep -af mavsdk_server || (/home/mavsdk_server -p 50051 udp://:14551 > /home/root/mavsdk_server.log 2>&1 &)   # 재부팅마다 수동. 출력은 파일로(터미널에만 남던 MAVLink 메시지 보존)
 systemctl is-active voxl-tag-detector || systemctl start voxl-tag-detector  # 태그 모드일 때만. conf: id 0~10 size 0.20, skip 1, down 끔
-cd /home/root && PYTHONIOENCODING=utf-8 python3 vio_check.py --seconds 20   # ① 바닥에 둔 채 PASS 필요
+cd /home/root && PYTHONIOENCODING=utf-8 python3 vio_check.py --seconds 20   # ① 바닥에 둔 채 PASS 필요 (uptime ≥ 120 s, EKF 자이로 바이어스 < 1 °/s, 헤딩 드리프트 < 0.3 °/s 포함)
 #   → 기체를 손으로 천천히 들어 30 cm 움직였다 제자리에 둔다
 cd /home/root && PYTHONIOENCODING=utf-8 python3 vio_check.py --seconds 20   # ② 다시 PASS (복귀 확인). FAIL 이면 30~60 s 뒤 재시도
 #   조종기: 위(Offboard). 이상하면 가운데(Position) 로 내리고 스틱으로 하강. 킬은 최후.
 PYTHONIOENCODING=utf-8 python3 marker_drift_flight.py --no-align --stop-mode distance --distance 0.5 \\
     --altitude 0.4 --takeoff-speed 0.15 --hover-ref 3 --hover-far 2 --hover-return 2 --condition T -y   # 실내 점검 비행 (낮게·느리게)
-#   비행 코드가 arm 직전 VIO 게이트를 다시 본다. 'vio-gate FAIL' 이면 arm 하지 않고 exit 3.
+#   비행 코드가 arm 직전 VIO 게이트를 다시 본다(⑦ 정지 헤딩 ⑧ uptime ⑨ 자이로 바이어스 포함). 'vio-gate FAIL' 이면 arm 하지 않고 exit 3.
+#   비행 중 EKF-VIO yaw 가 10° 넘게 벌어지면 'HEADING DISAGREEMENT' 로 스스로 착륙한다.
 ```
 이륙 지점: 전방 카메라 시야에 텍스처(가구·마커·벽 무늬)가 있어야 한다. 흰 벽·현수막만 보이면 특징점 0 → 게이트 FAIL.
 **추락·킬 스위치·강한 충격 뒤에는 반드시 기체 재부팅** → 3~5 분 대기 → vio_check (EKF 가속도계 바이어스·VIO 상태가 남아 다음 비행을 밀어낸다, 2026-11-10 2차 사고).
@@ -479,5 +560,6 @@ ssh -f -N -L 5901:localhost:5901 dronesim_tailscale      # 화면 보기 (RealVN
 ssh dronesim_tailscale 'docker exec -d -e DISPLAY=:1 -e QT_X11_NO_MITSHM=1 -e GZ_PARTITION=starling_2 starling-gz gz sim -g'  # 실행 중 인스턴스 2 에 Gazebo GUI 붙이기
 ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && python3 sim/pilot_stats.py logs/20261110_19*_i*'   # 여러 비행 통계 (조건별 s, n)
 ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && VIO_FAIL_AT=25 INSTANCE=3 sim/run_sim_drift.sh --condition V --run 1'   # 비행 중 VIO 상실 → 비상 착륙 검증
+ssh dronesim_tailscale 'cd ~/starling_sim/marker_drift && VIO_FAIL_AT=15 VIO_FAIL_JSON="{\"yaw_offset_deg\": 30}" INSTANCE=3 sim/run_sim_drift.sh --condition V --run 2'   # EKF-VIO 헤딩 발산 → HEADING DISAGREEMENT 착륙 검증
 ```
 인스턴스 2·3 병렬 가능(각 ~3.5 분). 끝난 뒤 `pgrep -af "px4|gz sim"` 가 비어 있어야 정리된 것. 서버의 `~/Drone_project` 클론은 뒤처져 있으니 건드리지 않는다.

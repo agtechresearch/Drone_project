@@ -93,7 +93,12 @@ class FakeDrone(object):
         self.vio_features = 11
         self.vio_state = "OKAY"
         self.vio_feed = True
+        self.vio_every_n = 1            # n 번째 push_pose 마다 VIO 샘플 (출력률 저하 흉내)
+        self._pose_n = 0
         self.extra_pipe_offset = (0.0, 0.0, 0.0)      # 파이프에만 더해지는 오프셋 → MAVSDK 와 불일치 흉내
+        self.ekf_yaw_drift_dps = 0.0                  # EKF(attitude_euler) yaw 만 이 속도로 흘러간다 (자이로 바이어스 고장 흉내)
+        self.ekf_yaw_offset = 0.0
+        self._att_t = None
         self.on_step = None                           # _step 마다 호출되는 훅 (시간 기반 고장 주입)
 
     async def connect(self):
@@ -133,7 +138,7 @@ class FakeDrone(object):
             if abs(self.d) < 0.03:
                 self.in_air_flag = False
             return
-        if self.target is None or self.stuck:
+        if self.target is None or self.stuck or not self.armed:   # arm 전에는 setpoint 를 따르지 않는다 (실기와 같게; v0.2.2 게이트 헤딩 검사)
             return
         g = self.gain
         self.n += (self.target.north_m - self.n) * g
@@ -149,9 +154,10 @@ class FakeDrone(object):
         self.ts_ms += 50.0
         ox, oy, oz = self.POSE_OFFSET
         ex, ey, ez = self.extra_pipe_offset
-        if self.vio_feed:
+        self._pose_n += 1
+        if self.vio_feed and self._pose_n % self.vio_every_n == 0:
             self.vehicle.update_vio({"quality": self.vio_quality, "features": self.vio_features, "state": self.vio_state,
-                                     "error_codes": "", "pos": None, "raw": "fake"})
+                                     "error_codes": "", "pos": None, "rpy": (0.0, 0.0, util.normalize_angle_deg(self.yaw)), "raw": "fake"})
         self.vehicle.update_pose("px4_vehicle_local_position", {
             "voxl_ts_ms": self.ts_ms, "pos_x": self.n + ox + ex, "pos_y": self.e + oy + ey, "pos_z": self.d + oz + ez,
             "roll_deg": 0.0, "pitch_deg": 0.0, "yaw_deg": util.yaw_to_360(self.yaw),
@@ -199,7 +205,14 @@ class FakeDrone(object):
 
     async def _att(self):
         while True:
-            yield _Obj(roll_deg=0.0, pitch_deg=0.0, yaw_deg=util.normalize_angle_deg(self.yaw))
+            if self.ekf_yaw_drift_dps:
+                tn = time.monotonic()
+                if self._att_t is not None:
+                    self.ekf_yaw_offset += self.ekf_yaw_drift_dps * (tn - self._att_t)
+                self._att_t = tn
+            else:
+                self._att_t = None
+            yield _Obj(roll_deg=0.0, pitch_deg=0.0, yaw_deg=util.normalize_angle_deg(self.yaw + self.ekf_yaw_offset))
             await asyncio.sleep(0.05)
 
 
@@ -318,7 +331,7 @@ def fast_cfg(**kw):
                 yaw_tol=3.0, yaw_stable_time=0.2, takeoff_speed=2.0, takeoff_hover_time=0.2,
                 preland_alt=0.2, preland_speed=2.0, preland_hover_time=0.2, pos_ok_hold_sec=0.1,
                 reach_pipe_timeout=3.0, csv_sample_sec=0.2, geofence_violation_sec=0.3,
-                vio_gate_window_s=0.4, vio_quiet_s=0.0, vio_bad_abort_s=0.3, est_disagree_s=0.3, mav_lag_calib_s=0.15)
+                vio_gate_window_s=0.4, vio_quiet_s=0.0, vio_bad_abort_s=0.3, est_disagree_s=0.3, mav_lag_calib_s=0.15, yaw_disagree_s=0.2, min_uptime_s=0.0, vio_min_rate_hz=0.0)
     base.update(kw)
     return FlightConfig(**base)
 
@@ -966,6 +979,7 @@ _pl = s2vio.parse_voxl_inspect_vio_line
 ok("vio parse: header -> None", _pl(" dt(ms) |    T_imu_wrt_vio (m)   |Roll Pitch Yaw (deg)|features|quality| state| error_codes ") is None)
 _pv = _pl("   66.7 |   -0.05    0.05   -0.03|  -2.2    0.4  -70.9|    11  |   96% | OKAY | ")
 ok("vio parse: sample -> quality 96 features 11 OKAY pos", _pv["quality"] == 96 and _pv["features"] == 11 and _pv["state"] == "OKAY" and _pv["pos"] == (-0.05, 0.05, -0.03), repr(_pv))
+ok("vio parse: rpy (-2.2, 0.4, -70.9)", _pv["rpy"] == (-2.2, 0.4, -70.9), repr(_pv.get("rpy")))
 _pf = _pl("   66.7 |    0.00    0.00    0.02|   0.0    0.0    0.0|     0  |    0% | FAILED | 0x8 ")
 ok("vio parse: failed -> quality 0 features 0 FAILED 0x8", _pf["quality"] == 0 and _pf["features"] == 0 and _pf["state"] == "FAILED" and _pf["error_codes"] == "0x8")
 _h = s2vio.VioHistory()
@@ -1173,6 +1187,136 @@ try:
     drone.status_texts.append(("CRITICAL", "Preflight Fail: High Accelerometer Bias"))
     v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(px4_msg_quiet_s=0.0), fast_params(do_align=False, stop_mode="distance"), None, tmp))
     ok("--px4-msg-quiet-sec 0 disables the statustext gate", seq["completed"])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# 11f. EKF heading drift defence (2026-11-12: gyro bias z -3.5 deg/s, heading spinning while static)
+# ---------------------------------------------------------------------------
+
+print("\n[ekf heading drift]")
+ok("yaw_range_deg wraps (359, 1, 0.5) -> 2", near(s2vio.yaw_range_deg([359.0, 1.0, 0.5]), 2.0, 1e-9))
+ok("yaw_range_deg ignores NaN / single", s2vio.yaw_range_deg([float("nan"), 10.0]) == 0.0)
+_hy = s2vio.VioHistory()
+for _i in range(5):
+    _hy.add({"quality": 90, "features": 10, "state": "OKAY", "rpy": (0.0, 0.0, 100.0 + 0.1 * _i), "mono_time": float(_i)})
+ok("VioHistory yaw_range + latest_yaw", near(_hy.summarize(4.0, 10.0)["yaw_range"], 0.4, 1e-6) and near(_hy.latest_yaw(), 100.4, 1e-9))
+_gb = s2vio.parse_px4_gyro_bias("    gyro_bias: [0.00306, 0.00682, -0.06156]\n    gyro_bias_limit: 0.15000\n")
+ok("parse px4 gyro bias -> deg/s (z -3.53)", _gb is not None and near(_gb[2], -3.527, 0.01) and near(_gb[0], 0.175, 0.01), repr(_gb))
+ok("parse px4 gyro bias: missing -> None", s2vio.parse_px4_gyro_bias("nothing") is None)
+_ab = s2vio.parse_px4_accel_bias("    gyro_bias: [0.0, 0.0, 0.0]\n    accel_bias: [0.00243, 0.00091, 0.39500]\n")
+ok("parse px4 accel bias (z 0.395)", _ab is not None and near(_ab[2], 0.395, 1e-6), repr(_ab))
+_hr = s2vio.VioHistory()
+for _i in range(31):
+    _hr.add({"quality": 90, "features": 10, "state": "OKAY", "mono_time": _i / 30.0})
+ok("VioHistory rate_hz ~30", near(_hr.summarize(1.0, 10.0)["rate_hz"], 30.0, 0.5), str(_hr.summarize(1.0, 10.0)["rate_hz"]))
+ok("read_uptime_s: None or float", s2vio.read_uptime_s() is None or isinstance(s2vio.read_uptime_s(), float))
+
+tmp = tempfile.mkdtemp(prefix="s2f_")
+try:
+    # (a) 지상에서 EKF yaw 가 8 deg/s 로 흐르면 게이트 거부 (0.4 s 창 → 3.2 deg > 1.0)
+    drone = FakeDrone()
+    drone.ekf_yaw_drift_dps = 8.0
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("gate FAIL on static EKF heading drift, never armed", err is not None and "heading drifted" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+    # (b) 부팅 직후 (uptime 30 s) → 거부
+    _orig_up = vehicle.read_uptime_s
+    vehicle.read_uptime_s = lambda: 30.0
+    try:
+        drone = FakeDrone()
+        err = None
+        try:
+            loop.run_until_complete(run_flight(drone, fast_cfg(min_uptime_s=120.0), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+        except vehicle.PreflightAbort as e:
+            err = e
+        ok("gate FAIL when booted 30 s ago (min 120)", err is not None and "booted only" in str(err) and "arm" not in drone.cmd_log, str(err))
+    finally:
+        vehicle.read_uptime_s = _orig_up
+
+    # (c) EKF 자이로 바이어스 -3.5 deg/s → 거부
+    _orig_gb = vehicle.read_px4_sensor_bias
+
+    async def _fake_gb(timeout_s=6.0):
+        return ((0.1, 0.2, -3.5), (0.0, 0.0, 0.1)), None
+    vehicle.read_px4_sensor_bias = _fake_gb
+    try:
+        drone = FakeDrone()
+        err = None
+        try:
+            loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+        except vehicle.PreflightAbort as e:
+            err = e
+        ok("gate FAIL on EKF gyro bias 3.5 deg/s", err is not None and "gyro bias" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+        async def _fake_ab(timeout_s=6.0):
+            return ((0.1, 0.0, 0.05), (0.01, -0.03, 0.395)), None
+        vehicle.read_px4_sensor_bias = _fake_ab
+        drone = FakeDrone()
+        err = None
+        try:
+            loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+        except vehicle.PreflightAbort as e:
+            err = e
+        ok("gate FAIL on EKF accel bias 0.395 m/s2 (ceiling crash state)", err is not None and "accel bias" in str(err) and "arm" not in drone.cmd_log, str(err))
+    finally:
+        vehicle.read_px4_sensor_bias = _orig_gb
+
+    # (c2) 특징점 6 (2026-11-12 이륙 지점) → 거부 (기본 vio_min_features 8)
+    drone = FakeDrone()
+    drone.vio_features = 6
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("gate FAIL on VIO features 6 (< 8)", err is not None and "features" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+    # (c3) VIO 출력률 저하 (1/4) → 거부
+    drone = FakeDrone()
+    drone.vio_every_n = 4
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(vio_min_rate_hz=10.0), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("gate FAIL on low VIO status rate", err is not None and "rate" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+    # (d) 비행 중 EKF yaw 만 60 deg/s 로 흐름 → HEADING DISAGREEMENT 착륙
+    drone = FakeDrone()
+
+    def _drift_after_offboard(d):
+        if d.vehicle is not None and d.vehicle.offboard_active:
+            d.ekf_yaw_drift_dps = 60.0
+    drone.on_step = _drift_after_offboard
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("in-flight EKF-vs-VIO heading divergence -> emergency land", v.aborted and "HEADING DISAGREEMENT" in (v.abort_reason or "") and "land" in drone.cmd_log,
+       "%s %s" % (v.abort_reason, drone.cmd_log[-3:]))
+    ok("heading base recorded at offboard start", v.summary_dict()["yaw_ekf_vio_base_deg"] is not None)
+
+    # (d2) attitude 스트림이 죽어 yaw 샘플이 없으면 게이트 FAIL (검사가 꺼진 채 통과 금지 — 2026-11-12 SITL V6)
+    drone = FakeDrone()
+
+    async def _never():
+        await asyncio.sleep(3600)
+        yield None
+    drone.telemetry.attitude_euler = _never
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("gate FAIL when no EKF yaw samples (dead attitude feed)", err is not None and "no EKF yaw samples" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+    # (e) 정상 기체: 통과, 요약에 yaw 샘플 수
+    drone = FakeDrone()
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("healthy: completes, gate records yaw drift ~0 and samples>0", seq["completed"] and v.vio_gate_result["ekf_yaw_range_deg"] < 0.5 and v.vio_gate_result["yaw_samples"] > 0 and v.mav_yaw_count > 0,
+       str(v.vio_gate_result))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

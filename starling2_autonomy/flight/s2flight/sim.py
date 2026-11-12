@@ -102,6 +102,9 @@ async def sim_pose_task(vehicle, pipe_names, is_running, errors, period_s=0.05):
                 upd = getattr(vehicle, "update_mav_position", None)
                 if upd is not None:
                     upd(pv)                 # SITL: MAVSDK 위치도 여기서 갱신 (두 번째 구독은 데이터를 못 받는다)
+                upa = getattr(vehicle, "update_mav_attitude", None)
+                if upa is not None and state["att"] is not None:
+                    upa(state["att"])       # SITL: EKF yaw 도 여기서 (게이트 정지 헤딩 검사·비행 중 EKF-VIO yaw 비교)
                 parsed = telemetry_to_pose(pv, state["att"], state["av"])
                 for p in pipes:
                     vehicle.update_pose(p, dict(parsed))
@@ -285,8 +288,11 @@ async def sim_vio_task(vehicle, is_running, period_s=0.1, status_file=None):
                 override = json.loads(txt) if txt else {}
             except (OSError, ValueError):
                 override = {}
-        parsed = {"quality": 100, "features": 50, "state": "OKAY", "error_codes": "", "pos": None, "raw": "sim"}
-        parsed.update(override)
+        ekf_yaw = getattr(vehicle, "mav_yaw_deg", float("nan"))
+        yaw_off = float(override.get("yaw_offset_deg", 0.0))      # VIO yaw 를 EKF yaw 에서 이만큼 떼어 놓는다 (헤딩 발산 시나리오)
+        parsed = {"quality": 100, "features": 50, "state": "OKAY", "error_codes": "", "pos": None, "raw": "sim",
+                  "rpy": (0.0, 0.0, (ekf_yaw if ekf_yaw == ekf_yaw else 0.0) + yaw_off)}
+        parsed.update(dict((k, v) for k, v in override.items() if k != "yaw_offset_deg"))
         parsed["mono_time"] = now
         parsed["wallclock"] = wallclock()
         vehicle.update_vio(parsed)

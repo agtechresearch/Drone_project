@@ -29,7 +29,7 @@ import math
 from .geofence import Geofence
 from .pose import pose_reader_task
 from .sim import sim_pose_task, sim_vio_task
-from .vio import VioHistory, vio_reader_task, journal_recent_vio_events
+from .vio import VioHistory, vio_reader_task, journal_recent_vio_events, yaw_range_deg, read_uptime_s, read_px4_gyro_bias, read_px4_sensor_bias
 from .util import (angle_diff_deg, body_delta_to_ned, evaluate_horizontal_tracking,
                    horizontal_norm, log, mono_time, normalize_angle_deg, wallclock, yaw_to_360)
 
@@ -123,6 +123,16 @@ class Vehicle(object):
         self.px4_armed = None            # telemetry.armed() 최신값 (None = 모름)
         self.status_task = None
         self.px4_msgs = collections.deque(maxlen=200)   # (mono_time, type, text) PX4 STATUSTEXT
+        # EKF 헤딩 감시 (v0.2.2, 2026-11-12 수동 비행 좌측 밀림·좌회전 = EKF 자이로 바이어스 -3.5 deg/s)
+        self.mav_yaw_deg = float("nan")  # MAVSDK attitude_euler 최신 yaw (0~360)
+        self.mav_yaw_count = 0
+        self._last_mav_yaw_time = 0.0
+        self.att_stream_task = None
+        self._yaw_disagree_base = None   # offboard 시작 시점의 (EKF yaw - VIO yaw)
+        self._yaw_disagree_since = None
+        self.uptime_s = None
+        self.gyro_bias_dps = None
+        self.accel_bias_ms2 = None
         self.expect_armed = False        # 우리가 arm 했고 아직 disarm 명령을 안 냈다
         self._mav_lag_warned = False
         self._mav_proc_last = 0.0
@@ -240,6 +250,8 @@ class Vehicle(object):
                 log("       Connected!")
                 if self.status_task is None:
                     self.status_task = asyncio.ensure_future(self._status_text_monitor())
+                if self.att_stream_task is None and not self.sim:
+                    self.att_stream_task = asyncio.ensure_future(self._mavsdk_attitude_stream())
                 return
             await asyncio.sleep(0.1)
 
@@ -343,16 +355,41 @@ class Vehicle(object):
         log("[4b/7] Capturing current heading as 'forward' ({} samples)...".format(samples))
         sx = sy = 0.0
         yaws = []
-        async for att in self.drone.telemetry.attitude_euler():
-            y = float(att.yaw_deg)
-            if y != y:                       # NaN
-                continue
-            yaws.append(y)
-            sx += math.cos(math.radians(y))
-            sy += math.sin(math.radians(y))
-            if len(yaws) >= samples:
-                break
-            await asyncio.sleep(interval)
+        if self.sim or self.att_stream_task is not None:
+            # 상시 attitude 공급(실기: 연결 직후 스트림, SITL: sim_pose_task)을 기다렸다가 그 값을 샘플링. 따로 구독하지 않는다
+            # (같은 스트림 이중 구독은 데이터를 못 받고, 닫아도 뒤 구독이 굶는 경우가 있다 — 2026-11-12 SITL V6).
+            t_wait = self.now()
+            while self.mav_yaw_count == 0 and self.now() - t_wait < 5.0:
+                await asyncio.sleep(0.05)
+        if self.mav_yaw_count > 0:
+            deadline = self.now() + samples * interval * 5 + 1.0
+            while len(yaws) < samples and self.now() < deadline:
+                y = self.mav_yaw_deg
+                if y == y:
+                    yaws.append(y)
+                    sx += math.cos(math.radians(y))
+                    sy += math.sin(math.radians(y))
+                await asyncio.sleep(interval)
+        else:
+            agen = self.drone.telemetry.attitude_euler()
+            try:
+                async for att in agen:
+                    y = float(att.yaw_deg)
+                    if y != y:                       # NaN
+                        continue
+                    yaws.append(y)
+                    sx += math.cos(math.radians(y))
+                    sy += math.sin(math.radians(y))
+                    if len(yaws) >= samples:
+                        break
+                    await asyncio.sleep(interval)
+            finally:
+                aclose = getattr(agen, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except Exception:  # noqa: BLE001
+                        pass
         if not yaws:
             raise RuntimeError("attitude_euler 에서 yaw 를 받지 못했다 (--initial-yaw zero 로 v14 동작 가능)")
         mean = math.degrees(math.atan2(sy, sx))
@@ -411,13 +448,44 @@ class Vehicle(object):
                     log("       [vio-gate] journal: {}".format(l[-110:]))
                 self._gate_fail("open-vins BAD/reset within last {:.0f}s ({} lines) — wait and re-check".format(
                     cfg.vio_quiet_s, len(journal)))
+        # (8) 부팅 경과 시간 — 2026-11-12: 부팅 31 s 만에 arm 한 비행에서 EKF 자이로 바이어스가 수렴 전(-3.5 deg/s)이었다
+        if not self.sim and cfg.min_uptime_s > 0:
+            self.uptime_s = read_uptime_s()
+            if self.uptime_s is None:
+                log("       [vio-gate] /proc/uptime unavailable — skipping uptime check")
+            elif self.uptime_s < cfg.min_uptime_s:
+                self._gate_fail("vehicle booted only {:.0f}s ago (< {:.0f}s) — wait, keep it still, re-run".format(self.uptime_s, cfg.min_uptime_s))
+            else:
+                log("       [vio-gate] uptime {:.0f}s".format(self.uptime_s))
+        # (9) EKF 자이로·가속도계 바이어스
+        if not self.sim and (cfg.gyro_bias_max_dps > 0 or cfg.accel_bias_max_ms2 > 0):
+            r, err = await read_px4_sensor_bias()
+            if r is None:
+                log("       [vio-gate] EKF sensor bias unavailable ({}) — skipping".format(err))
+            else:
+                self.gyro_bias_dps, self.accel_bias_ms2 = r
+                log("       [vio-gate] EKF gyro bias x {:+.2f} y {:+.2f} z {:+.2f} deg/s (limit {:.1f})".format(
+                    self.gyro_bias_dps[0], self.gyro_bias_dps[1], self.gyro_bias_dps[2], cfg.gyro_bias_max_dps))
+                worst = max(abs(b) for b in self.gyro_bias_dps)
+                if cfg.gyro_bias_max_dps > 0 and worst > cfg.gyro_bias_max_dps:
+                    self._gate_fail("EKF gyro bias {:.2f} deg/s > {:.1f} (heading will drift while hovering) — REBOOT, leave still 2-3 min".format(
+                        worst, cfg.gyro_bias_max_dps))
+                if self.accel_bias_ms2 is not None:
+                    log("       [vio-gate] EKF accel bias x {:+.2f} y {:+.2f} z {:+.2f} m/s2 (limit {:.2f})".format(
+                        self.accel_bias_ms2[0], self.accel_bias_ms2[1], self.accel_bias_ms2[2], cfg.accel_bias_max_ms2))
+                    worst_a = max(abs(b) for b in self.accel_bias_ms2)
+                    if cfg.accel_bias_max_ms2 > 0 and worst_a > cfg.accel_bias_max_ms2:
+                        self._gate_fail("EKF accel bias {:.2f} m/s2 > {:.2f} (dead reckoning will run away if VIO drops — 2026-11-12 ceiling) — REBOOT".format(
+                            worst_a, cfg.accel_bias_max_ms2))
         t0 = self.now()
-        fb_pts, mav_pts = [], []
+        fb_pts, mav_pts, yaw_pts = [], [], []
         while self.now() - t0 < window_s:
             fb = self.feedback_state()
             if fb is not None:
                 fb_pts.append((fb["rel_n"], fb["rel_e"], fb["rel_u"]))
             mav_pts.append(self.mav_rel_position())
+            if self.mav_yaw_deg == self.mav_yaw_deg:
+                yaw_pts.append(self.mav_yaw_deg)
             if self.aborted:
                 self._gate_fail("vehicle aborted during gate: {}".format(self.abort_reason))
             await asyncio.sleep(0.1)
@@ -428,6 +496,7 @@ class Vehicle(object):
                 return 0.0
             return max(max(p[i] for p in pts) - min(p[i] for p in pts) for i in range(3))
         fb_rng, mav_rng = _range(fb_pts), _range(mav_pts)
+        yaw_rng = yaw_range_deg(yaw_pts)
         dv = dh = float("nan")
         if fb_pts:
             f, m = fb_pts[-1], mav_pts[-1]
@@ -436,10 +505,14 @@ class Vehicle(object):
         result = {"passed": True, "window_s": window_s, "vio_n": summ["n"], "min_quality": summ["min_quality"],
                   "mean_quality": summ["mean_quality"], "min_features": summ["min_features"], "n_not_ok": summ["n_not_ok"],
                   "fb_range_m": fb_rng, "mav_range_m": mav_rng, "disagree_v_m": dv, "disagree_h_m": dh,
+                  "ekf_yaw_range_deg": yaw_rng, "vio_yaw_range_deg": summ["yaw_range"], "yaw_samples": len(yaw_pts),
+                  "uptime_s": self.uptime_s, "gyro_bias_dps": self.gyro_bias_dps, "accel_bias_ms2": self.accel_bias_ms2,
+                  "vio_rate_hz": summ["rate_hz"],
                   "journal_events": (len(journal) if journal is not None else None)}
         self.vio_gate_result = result
-        log("       [vio-gate] samples={} quality min {} mean {:.0f} features min {} not_ok {} | drift fb {:.3f} mav {:.3f} m | fb-mav dV {:.3f} dH {:.3f} m".format(
-            summ["n"], summ["min_quality"], summ["mean_quality"], summ["min_features"], summ["n_not_ok"], fb_rng, mav_rng, dv, dh))
+        log("       [vio-gate] samples={} quality min {} mean {:.0f} features min {} not_ok {} | drift fb {:.3f} mav {:.3f} m | fb-mav dV {:.3f} dH {:.3f} m | yaw drift EKF {:.2f} VIO {:.2f} deg ({} samples)".format(
+            summ["n"], summ["min_quality"], summ["mean_quality"], summ["min_features"], summ["n_not_ok"], fb_rng, mav_rng, dv, dh,
+            yaw_rng, summ["yaw_range"], len(yaw_pts)))
         if summ["n"] == 0:
             self._gate_fail("no VIO status samples (voxl-inspect-vio -n {} not running?)".format(cfg.vio_pipe), result)
         if summ["min_quality"] < cfg.vio_min_quality:
@@ -447,13 +520,23 @@ class Vehicle(object):
         if summ["n_not_ok"] > 0:
             self._gate_fail("VIO state not OKAY in {} samples".format(summ["n_not_ok"]), result)
         if summ["min_features"] >= 0 and summ["min_features"] < cfg.vio_min_features:
-            self._gate_fail("VIO features min {} < {} (featureless view?)".format(summ["min_features"], cfg.vio_min_features), result)
+            self._gate_fail("VIO features min {} < {} (featureless view — add texture in front of the camera / move the takeoff spot)".format(
+                summ["min_features"], cfg.vio_min_features), result)
+        if cfg.vio_min_rate_hz > 0 and not self.sim and summ["n"] >= 2 and summ["rate_hz"] < cfg.vio_min_rate_hz:
+            self._gate_fail("VIO status rate {:.1f} Hz < {:.0f} (tracker struggling)".format(summ["rate_hz"], cfg.vio_min_rate_hz), result)
         if not fb_pts:
             self._gate_fail("no reach-pipe feedback during gate window", result)
         if fb_rng > cfg.vio_static_drift_m:
             self._gate_fail("feedback pipe drifted {:.3f} m in {:.1f}s while on ground (limit {:.2f})".format(fb_rng, window_s, cfg.vio_static_drift_m), result)
         if mav_rng > cfg.vio_static_drift_m:
             self._gate_fail("MAVSDK position drifted {:.3f} m in {:.1f}s while on ground (limit {:.2f})".format(mav_rng, window_s, cfg.vio_static_drift_m), result)
+        if cfg.static_yaw_drift_deg > 0 and not yaw_pts:
+            self._gate_fail("no EKF yaw samples during gate (attitude feed dead) — heading checks would be silently off", result)
+        if cfg.static_yaw_drift_deg > 0 and yaw_rng > cfg.static_yaw_drift_deg:
+            self._gate_fail("EKF heading drifted {:.2f} deg in {:.1f}s while on ground (limit {:.1f}) — gyro bias wrong, REBOOT and leave still 2-3 min".format(
+                yaw_rng, window_s, cfg.static_yaw_drift_deg), result)
+        if cfg.static_yaw_drift_deg > 0 and summ["yaw_range"] > cfg.static_yaw_drift_deg * 3:
+            self._gate_fail("VIO yaw drifted {:.2f} deg in {:.1f}s while on ground".format(summ["yaw_range"], window_s), result)
         if dv > cfg.est_disagree_v_m / 2.0 or dh > cfg.est_disagree_h_m / 2.0:
             self._gate_fail("pipe vs MAVSDK disagree dV {:.3f} dH {:.3f} m before arm".format(dv, dh), result)
         bad_msgs = self.recent_bad_px4_msgs(cfg.px4_msg_quiet_s) if cfg.px4_msg_quiet_s > 0 else []
@@ -574,6 +657,55 @@ class Vehicle(object):
         pats = tuple(self.cfg.px4_msg_bad_patterns)
         return [(t, typ, txt) for (t, typ, txt) in self.px4_msgs if now - t <= seconds and any(p.lower() in txt.lower() for p in pats)]
 
+    def update_mav_attitude(self, att):
+        """MAVSDK attitude_euler 한 건 반영 (실기: _mavsdk_attitude_stream, SITL: sim_pose_task)."""
+        y = float(getattr(att, "yaw_deg", float("nan")))
+        if y != y:
+            return
+        self.mav_yaw_deg = yaw_to_360(y)
+        self.mav_yaw_count += 1
+        self._last_mav_yaw_time = self.now()
+
+    async def _mavsdk_attitude_stream(self):
+        """attitude_euler 를 연결 직후부터 쉬지 않고 소화한다 (게이트의 정지 헤딩 드리프트 검사·비행 중 EKF-VIO yaw 비교)."""
+        try:
+            async for att in self.drone.telemetry.attitude_euler():
+                self.update_mav_attitude(att)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log("       [att] attitude stream stopped: {!r}".format(e))
+
+    def _check_heading_disagreement(self, now):
+        """비행 중 EKF yaw - VIO yaw 가 offboard 시작 시점 대비 yaw_disagree_deg 이상 벌어지면 착륙 (v0.2.2).
+        2026-11-12: EKF 자이로 z 바이어스 -3.5 deg/s → EKF 헤딩이 정지 상태에서도 3.5 deg/s 로 회전, VIO yaw 는 멈춰 있었다."""
+        cfg = self.cfg
+        if cfg.yaw_disagree_deg <= 0:
+            return
+        vio_yaw = self.vio.latest_yaw()
+        if vio_yaw != vio_yaw or self.mav_yaw_deg != self.mav_yaw_deg:
+            return
+        if now - self._last_mav_yaw_time > 0.5 or self.vio.age(now) > 0.5:
+            return
+        diff = angle_diff_deg(self.mav_yaw_deg, vio_yaw)
+        if self._yaw_disagree_base is None:
+            self._yaw_disagree_base = diff
+            self._yaw_disagree_since = None
+            log("       [heading] EKF-VIO yaw offset at offboard start {:+.1f} deg (limit ±{:.0f})".format(diff, cfg.yaw_disagree_deg))
+            return
+        dev = angle_diff_deg(diff, self._yaw_disagree_base)
+        self._extra_sync["yaw_ekf_vio_dev_deg"] = round(dev, 2)
+        if abs(dev) > cfg.yaw_disagree_deg:
+            if self._yaw_disagree_since is None:
+                self._yaw_disagree_since = now
+            elif now - self._yaw_disagree_since >= cfg.yaw_disagree_s:
+                self._yaw_disagree_since = None
+                asyncio.ensure_future(self.trigger_emergency_land(
+                    "HEADING DISAGREEMENT: EKF yaw drifted {:+.1f} deg vs VIO since offboard (limit {:.0f}) — EKF gyro bias/heading broken, reboot".format(
+                        dev, cfg.yaw_disagree_deg)))
+        else:
+            self._yaw_disagree_since = None
+
     async def _armed_monitor(self):
         """PX4 arm 상태 감시 (2026-11-10 1차 사고 재시도: 킬 스위치로 disarm 된 뒤에도 코드가 30 s 동안 시퀀스를 계속했다).
         우리가 arm 한 상태(expect_armed)에서 PX4 가 disarm 이라고 하면 즉시 중단한다. 착륙/disarm 을 우리가 명령한 뒤에는 정상."""
@@ -686,6 +818,7 @@ class Vehicle(object):
                 if fb is not None and fb["age_sec"] > cfg.feedback_stale_abort_s:
                     asyncio.ensure_future(self.trigger_emergency_land(
                         "FEEDBACK PIPE STALE {:.1f}s ({})".format(fb["age_sec"], self.reach_pipe)))
+                self._check_heading_disagreement(now)
             await asyncio.sleep(0.1)
 
     async def _health_monitor(self):
@@ -734,6 +867,12 @@ class Vehicle(object):
 
     async def start_monitors_and_offboard(self, prime_sec=3.0):
         """스트림·감시 시작 → reach 파이프 정렬 → arm → offboard 시작 → 지오펜스 ARM."""
+        if self.sim:
+            # SITL: 포즈·attitude 공급원을 먼저 띄운다. capture_initial_yaw 가 attitude_euler 를 따로 구독했다 닫으면
+            # 뒤의 sim_pose_task 구독이 데이터를 못 받는 경우가 있었다 (2026-11-12 SITL V6: 게이트 yaw 샘플 0 → 헤딩 검사 무음 비활성).
+            self.monitoring = True
+            self.voxl_tasks.append(asyncio.ensure_future(
+                sim_pose_task(self, self.cfg.voxl_pipes, self._is_running, self.voxl_reader_errors)))
         if self.initial_yaw_deg is None:
             await self.capture_initial_yaw()
         log("[5/7] Starting monitors + priming setpoint stream ({:.0f}s)...".format(prime_sec))
@@ -748,8 +887,7 @@ class Vehicle(object):
         self.armed_task = asyncio.ensure_future(self._armed_monitor())
         self.health_task = asyncio.ensure_future(self._health_monitor())
         if self.sim:
-            self.voxl_tasks.append(asyncio.ensure_future(
-                sim_pose_task(self, self.cfg.voxl_pipes, self._is_running, self.voxl_reader_errors)))
+            pass                                 # sim_pose_task 는 위에서 이미 시작
         elif self.pose_readers:
             for pipe in self.cfg.voxl_pipes:
                 self.voxl_tasks.append(asyncio.ensure_future(
@@ -1470,7 +1608,7 @@ class Vehicle(object):
     async def cancel_background_tasks(self):
         self.streaming = False
         self.monitoring = False
-        tasks = [self.stream_task, self.mav_task, self.mav_stream_task, self.mav_lag_task, self.armed_task, self.status_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
+        tasks = [self.stream_task, self.mav_task, self.mav_stream_task, self.mav_lag_task, self.armed_task, self.status_task, self.att_stream_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
         for task in tasks:
             if task and not task.done():
                 task.cancel()
@@ -1537,6 +1675,8 @@ class Vehicle(object):
             "vio_gate": self.vio_gate_result, "vio_samples": self.vio.n, "vio_bad_episodes": self.vio.n_bad_episodes,
             "mav_lag_s": self.mav_lag_s, "mav_lag_known": self.mav_lag_known, "mav_updates": self.mav_update_count,
             "px4_armed_last": self.px4_armed,
+            "uptime_s": self.uptime_s, "gyro_bias_dps": self.gyro_bias_dps, "accel_bias_ms2": self.accel_bias_ms2, "mav_yaw_updates": self.mav_yaw_count,
+            "yaw_ekf_vio_base_deg": self._yaw_disagree_base,
             "px4_msgs": [(round(t, 2), typ, txt) for (t, typ, txt) in list(self.px4_msgs)[-40:]],
             "results": self.results, "snapshots": self.snapshots,
             "config": self.cfg.as_dict(),

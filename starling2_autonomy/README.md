@@ -81,7 +81,7 @@ python analysis/test_geofence_v14.py       # 지오펜스 25항목
 python analysis/test_mpa_point_cloud.py    # voa_pc_out 파서 60항목
 python analysis/test_mpa_tag_detections.py # tag_detections 파서 49항목
 python analysis/test_tag_align.py          # 태그 정렬(yaw 폐루프) 74항목
-python analysis/test_s2flight.py           # s2flight 실험 비행 패키지 181항목 (가짜 기체로 드리프트 시퀀스 전체 + SITL 모드)
+python analysis/test_s2flight.py           # s2flight 실험 비행 패키지 200항목 (가짜 기체로 드리프트 시퀀스 전체 + SITL 모드)
 
 # 마커 드리프트 후처리(docs/09)는 numpy·opencv·pupil-apriltags 등이 필요하므로 venv 에서 돈다
 python -m venv .venv && .venv/Scripts/python -m pip install numpy opencv-python pupil-apriltags pandas matplotlib scipy pyyaml

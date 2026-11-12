@@ -43,7 +43,7 @@ class FlightConfig(object):
     vio_gate = True
     vio_pipe = "ov"                 # voxl-inspect-vio 파이프 (open-vins 원출력). vvhub_aligned_vio 도 가능
     vio_min_quality = 50             # 게이트: 창 안 최소 품질 %
-    vio_min_features = 3             # 게이트: 창 안 최소 특징점 수 (사고 때 0)
+    vio_min_features = 8             # 게이트: 창 안 최소 특징점 수 (사고 때 0; 2026-11-12 특징점 6 인 지점에서 이륙 순간 VIO 상실 → 천장)
     vio_gate_window_s = 3.0          # 게이트 관찰 창 s (정지 상태)
     vio_quiet_s = 30.0               # 게이트: 최근 이 시간 안에 open-vins 저널에 BAD/리셋이 있으면 거부 (journalctl 없으면 생략)
     vio_static_drift_m = 0.03        # 게이트: 창 안 파이프·MAVSDK 위치 변동 상한 m (사고 때 3 s 에 0.45 m)
@@ -66,6 +66,15 @@ class FlightConfig(object):
     px4_msg_quiet_s = 30.0           # 게이트: 최근 이 시간 안에 아래 패턴의 PX4 메시지가 있으면 arm 거부. 0 = 끔
     px4_msg_bad_patterns = ("Preflight Fail", "Accelerometer Bias", "estimate error", "Attitude failure",
                             "Flight termination", "Kill switch", "velocity unstable", "height estimate not stable")
+
+    # EKF 헤딩 드리프트 방어 (2026-11-12: 부팅 31 s 만에 arm → EKF 자이로 z 바이어스 -3.5 deg/s, 정지 상태에서 헤딩이 돌아 좌측 밀림·좌회전)
+    min_uptime_s = 120.0             # 게이트: 부팅 뒤 이 시간이 지나야 arm (실기만, /proc/uptime). 0 = 끔
+    static_yaw_drift_deg = 1.0       # 게이트: 게이트 창(vio_gate_window_s) 동안 지상 정지인데 EKF yaw 가 이보다 변하면 거부
+    gyro_bias_max_dps = 1.0          # 게이트: EKF 자이로 바이어스(px4-listener estimator_sensor_bias) 축별 |값| 상한 deg/s. 0 = 끔
+    accel_bias_max_ms2 = 0.3         # 게이트: EKF 가속도계 바이어스 축별 |값| 상한 m/s² (PX4 한계 0.4; 2026-11-12 천장 충돌 때 0.40). 0 = 끔
+    vio_min_rate_hz = 20.0           # 게이트: 게이트 창 VIO 상태 출력률 하한 (정상 30 Hz; 특징점 부족 지점에서 15~25 Hz). 0 = 끔
+    yaw_disagree_deg = 10.0          # 비행 중: EKF yaw - VIO yaw 가 offboard 시작 시점 대비 이만큼 벌어지면 착륙. 0 = 끔
+    yaw_disagree_s = 0.5             # 비행 중: 위 조건 지속 시간
 
     # 지오펜스 (v14)
     no_geofence = False
@@ -193,6 +202,19 @@ class FlightConfig(object):
         s.add_argument("--mav-lag-abort-sec", dest="mav_lag_abort_s", type=float, default=FlightConfig.mav_lag_abort_s)
         s.add_argument("--px4-msg-quiet-sec", dest="px4_msg_quiet_s", type=float, default=FlightConfig.px4_msg_quiet_s,
                        help="최근 이 시간 안 PX4 'Preflight Fail' 등 메시지가 있으면 arm 거부. 0 = 끔")
+        s.add_argument("--min-uptime-sec", dest="min_uptime_s", type=float, default=FlightConfig.min_uptime_s,
+                       help="부팅 뒤 이 시간 전에는 arm 거부 (EKF 자이로 바이어스 수렴 대기). 0 = 끔")
+        s.add_argument("--static-yaw-drift-deg", dest="static_yaw_drift_deg", type=float, default=FlightConfig.static_yaw_drift_deg,
+                       help="게이트 창 동안 지상 정지 EKF yaw 변동 상한 (deg)")
+        s.add_argument("--gyro-bias-max-dps", dest="gyro_bias_max_dps", type=float, default=FlightConfig.gyro_bias_max_dps,
+                       help="EKF 자이로 바이어스 축별 상한 (deg/s). 0 = 끔")
+        s.add_argument("--accel-bias-max", dest="accel_bias_max_ms2", type=float, default=FlightConfig.accel_bias_max_ms2,
+                       help="EKF 가속도계 바이어스 축별 상한 (m/s²). 0 = 끔")
+        s.add_argument("--vio-min-rate-hz", dest="vio_min_rate_hz", type=float, default=FlightConfig.vio_min_rate_hz,
+                       help="게이트 창 VIO 출력률 하한 (Hz). 0 = 끔")
+        s.add_argument("--yaw-disagree-deg", dest="yaw_disagree_deg", type=float, default=FlightConfig.yaw_disagree_deg,
+                       help="비행 중 EKF-VIO yaw 발산 한계 (deg). 0 = 끔")
+        s.add_argument("--yaw-disagree-sec", dest="yaw_disagree_s", type=float, default=FlightConfig.yaw_disagree_s)
         g.add_argument("--offboard-start-retries", type=int, default=FlightConfig.offboard_start_retries,
                        help="offboard 시작 거부(NO_SETPOINT_SET 등) 시 재시도 횟수. 0 = 즉시 비상정지(v14 동작)")
         g.add_argument("--offboard-retry-sec", type=float, default=FlightConfig.offboard_retry_sec)
