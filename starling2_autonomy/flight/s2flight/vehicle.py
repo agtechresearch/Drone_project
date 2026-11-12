@@ -23,6 +23,7 @@ MAVSDK 객체는 생성자 drone= 으로 바꿔 끼울 수 있다(테스트용 �
 """
 
 import asyncio
+import collections
 import math
 
 from .geofence import Geofence
@@ -112,6 +113,19 @@ class Vehicle(object):
         self.offboard_active = False
         self._est_disagree_since = None
         self._vio_was_bad = False
+        # MAVSDK 지연 감시 (v0.2.1)
+        self.mav_lag_s = 0.0
+        self.mav_lag_known = False
+        self.mav_lag_task = None
+        self.mav_stream_task = None
+        self._mav_lag_base = None
+        self.armed_task = None
+        self.px4_armed = None            # telemetry.armed() 최신값 (None = 모름)
+        self.status_task = None
+        self.px4_msgs = collections.deque(maxlen=200)   # (mono_time, type, text) PX4 STATUSTEXT
+        self.expect_armed = False        # 우리가 arm 했고 아직 disarm 명령을 안 냈다
+        self._mav_lag_warned = False
+        self._mav_proc_last = 0.0
         self._emergency_lock = asyncio.Lock()
         self._emergency_triggered = False
         self._stream_fail_count = 0
@@ -224,6 +238,8 @@ class Vehicle(object):
         async for state in self.drone.core.connection_state():
             if state.is_connected:
                 log("       Connected!")
+                if self.status_task is None:
+                    self.status_task = asyncio.ensure_future(self._status_text_monitor())
                 return
             await asyncio.sleep(0.1)
 
@@ -259,17 +275,29 @@ class Vehicle(object):
         log("       Local position health stable.")
 
     async def capture_initial_mavsdk_position(self, samples=10, interval=0.3):
-        log("[4/7] Capturing initial MAVSDK NED position ({} samples)...".format(samples))
+        """초기 NED 를 잡는다. 스트림을 쉬지 않고 소화하면서 samples*interval 초 동안 모은다
+        (v0.2.1: 메시지마다 sleep 하면 gRPC 버퍼에 밀려 과거 값을 읽게 된다 — 2026-11-10 2차 사고)."""
+        window = max(0.5, samples * interval)
+        log("[4/7] Capturing initial MAVSDK NED position ({:.1f}s window)...".format(window))
+        await self._request_mav_rates()
         xs, ys, zs = [], [], []
-        count = 0
-        async for pos in self.drone.telemetry.position_velocity_ned():
-            xs.append(pos.position.north_m)
-            ys.append(pos.position.east_m)
-            zs.append(pos.position.down_m)
-            count += 1
-            if count >= samples:
-                break
-            await asyncio.sleep(interval)
+        t0 = self.now()
+        agen = self.drone.telemetry.position_velocity_ned()
+        try:
+            async for pos in agen:
+                xs.append(pos.position.north_m)
+                ys.append(pos.position.east_m)
+                zs.append(pos.position.down_m)
+                if self.now() - t0 >= window and len(xs) >= 3:
+                    break
+        finally:
+            aclose = getattr(agen, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()          # 구독을 닫는다 — 열어 두면 뒤의 구독이 데이터를 못 받을 수 있다
+                except Exception:  # noqa: BLE001
+                    pass
+        samples = len(xs)
 
         self.initial_x = sum(xs) / len(xs)
         self.initial_y = sum(ys) / len(ys)
@@ -428,6 +456,16 @@ class Vehicle(object):
             self._gate_fail("MAVSDK position drifted {:.3f} m in {:.1f}s while on ground (limit {:.2f})".format(mav_rng, window_s, cfg.vio_static_drift_m), result)
         if dv > cfg.est_disagree_v_m / 2.0 or dh > cfg.est_disagree_h_m / 2.0:
             self._gate_fail("pipe vs MAVSDK disagree dV {:.3f} dH {:.3f} m before arm".format(dv, dh), result)
+        bad_msgs = self.recent_bad_px4_msgs(cfg.px4_msg_quiet_s) if cfg.px4_msg_quiet_s > 0 else []
+        result["px4_bad_msgs"] = len(bad_msgs)
+        if bad_msgs:
+            for t, typ, txt in bad_msgs[-4:]:
+                log("       [vio-gate] px4 {:.0f}s ago {}: {}".format(self.now() - t, typ, txt))
+            self._gate_fail("PX4 reported '{}' {:.0f}s ago ({} msgs in {:.0f}s) — reboot/recalibrate and wait".format(
+                bad_msgs[-1][2][:60], self.now() - bad_msgs[-1][0], len(bad_msgs), cfg.px4_msg_quiet_s), result)
+        result["mav_lag_s"] = self.mav_lag_s if self.mav_lag_known else None
+        if self.mav_lag_known and self.mav_lag_s > cfg.mav_lag_warn_s:
+            self._gate_fail("MAVSDK telemetry lag {:.2f}s > {:.2f}s (consumer falling behind)".format(self.mav_lag_s, cfg.mav_lag_warn_s), result)
         log("       [vio-gate] PASS")
         self.event("vio_gate", "PASS", **dict((k, v) for k, v in result.items() if k != "passed"))
 
@@ -446,36 +484,170 @@ class Vehicle(object):
     # 감시 태스크
     # ------------------------------------------------------------------
 
-    async def _mavsdk_position_monitor(self):
+    async def _request_mav_rates(self):
+        """PX4 에 텔레메트리 전송률을 cfg.mav_rate_hz 로 요청한다 (기체 onboard 링크 기본 30 Hz). 실패해도 계속."""
+        tel = self.drone.telemetry
+        for name in ("set_rate_position_velocity_ned", "set_rate_odometry"):
+            fn = getattr(tel, name, None)
+            if fn is None:
+                continue
+            try:
+                await asyncio.wait_for(fn(float(self.cfg.mav_rate_hz)), timeout=2.0)
+            except Exception as e:  # noqa: BLE001
+                log("       [mav] {}({}) failed: {}".format(name, self.cfg.mav_rate_hz, e))
+
+    def mav_fresh(self):
+        """MAVSDK 위치를 판정에 써도 되는가 (지연 < mav_lag_warn_s). 지연을 아직 모르면 True."""
+        return (not self.mav_lag_known) or self.mav_lag_s <= self.cfg.mav_lag_warn_s
+
+    def update_mav_position(self, pos):
+        """MAVSDK position_velocity_ned 한 건 반영 (실기: _mavsdk_position_stream, SITL: sim_pose_task 가 호출)."""
+        self.mav_x, self.mav_y, self.mav_z = pos.position.north_m, pos.position.east_m, pos.position.down_m
+        self.mav_vn, self.mav_ve, self.mav_vd = pos.velocity.north_m_s, pos.velocity.east_m_s, pos.velocity.down_m_s
+        new_value = (self.mav_x, self.mav_y, self.mav_z)
+        if new_value != self._last_mav_value:
+            self._last_mav_update_time = self.now()
+            self._last_mav_value = new_value
+            self.mav_update_count += 1
+
+    async def _mavsdk_position_stream(self):
+        """position_velocity_ned 스트림을 **쉬지 않고** 소화한다 (v0.2.1). 메시지마다 sleep 하면 gRPC 가 버퍼링해 위치가
+        초당 수백 ms 씩 과거로 밀린다 (2026-11-10: 30 Hz 입력 vs 18 Hz 소비 → 이륙 때 2~3 s, 첫 사고 때 6~8 s 지연).
+        SITL 에서는 sim_pose_task 가 같은 스트림을 이미 구독하므로(두 번째 구독은 데이터를 못 받는다 — 2026-11-10 발견) 이 태스크를 띄우지 않고
+        sim_pose_task 가 update_mav_position 을 호출한다."""
         async for pos in self.drone.telemetry.position_velocity_ned():
             if not self.monitoring:
                 break
-            self.mav_x, self.mav_y, self.mav_z = pos.position.north_m, pos.position.east_m, pos.position.down_m
-            self.mav_vn, self.mav_ve, self.mav_vd = pos.velocity.north_m_s, pos.velocity.east_m_s, pos.velocity.down_m_s
+            self.update_mav_position(pos)
 
-            new_value = (self.mav_x, self.mav_y, self.mav_z)
-            if new_value != self._last_mav_value:
-                self._last_mav_update_time = self.now()
-                self._last_mav_value = new_value
-                self.mav_update_count += 1
-
+    async def _mavsdk_position_monitor(self):
+        """주기(0.05 s) 처리 루프: 기록·지오펜스·추정기 불일치. 스트림 소비와 분리돼 있어 입력률과 무관하게 돈다."""
+        while self.monitoring:
+            await asyncio.sleep(0.05)
+            if not self.monitoring:
+                break
+            now = self.now()
             if self.rec is not None:
                 self.rec.stage_sample(self)
 
-            reason = self.geofence.check(
-                self.now(),
-                (self.target.north_m, self.target.east_m, self.target.down_m),
-                (self.mav_x, self.mav_y, self.mav_z),
-                (self.initial_x, self.initial_y, self.initial_z))
-            if reason:
-                asyncio.ensure_future(self.trigger_emergency_land(reason))
+            # 지오펜스 입력: 실시간인 reach 파이프(명령 프레임)를 우선, 없으면 신선한 MAVSDK
+            fb = self.feedback_state()
+            actual = None
+            if fb is not None and fb["age_sec"] <= 0.5:
+                actual = (fb["cmd_n"], fb["cmd_e"], fb["cmd_d"])
+            elif self.mav_fresh() and now - self._last_mav_update_time <= 0.5:
+                actual = (self.mav_x, self.mav_y, self.mav_z)
+            if actual is not None:
+                reason = self.geofence.check(
+                    now,
+                    (self.target.north_m, self.target.east_m, self.target.down_m),
+                    actual,
+                    (self.initial_x, self.initial_y, self.initial_z))
+                if reason:
+                    asyncio.ensure_future(self.trigger_emergency_land(reason))
             self._check_estimator_disagreement()
-            await asyncio.sleep(0.05)
+
+    async def _status_text_monitor(self):
+        """PX4 STATUSTEXT(사전점검 실패·킬·failsafe 메시지)를 모은다. mavsdk_server 가 터미널에만 뿌리던 내용을 기록·판정에 쓴다."""
+        tel = self.drone.telemetry
+        fn = getattr(tel, "status_text", None)
+        if fn is None:
+            return
+        try:
+            async for st in fn():
+                text = str(getattr(st, "text", "")).strip()
+                typ = str(getattr(st, "type", "")).split(".")[-1]
+                if not text:
+                    continue
+                self.px4_msgs.append((self.now(), typ, text))
+                if typ in ("CRITICAL", "ALERT", "EMERGENCY", "ERROR", "WARNING"):
+                    log("       [px4] {}: {}".format(typ, text))
+                    if self.rec is not None:
+                        self.event("px4_msg", "{}: {}".format(typ, text))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log("       [px4] status_text monitor stopped: {!r}".format(e))
+
+    def recent_bad_px4_msgs(self, seconds):
+        now = self.now()
+        pats = tuple(self.cfg.px4_msg_bad_patterns)
+        return [(t, typ, txt) for (t, typ, txt) in self.px4_msgs if now - t <= seconds and any(p.lower() in txt.lower() for p in pats)]
+
+    async def _armed_monitor(self):
+        """PX4 arm 상태 감시 (2026-11-10 1차 사고 재시도: 킬 스위치로 disarm 된 뒤에도 코드가 30 s 동안 시퀀스를 계속했다).
+        우리가 arm 한 상태(expect_armed)에서 PX4 가 disarm 이라고 하면 즉시 중단한다. 착륙/disarm 을 우리가 명령한 뒤에는 정상."""
+        tel = self.drone.telemetry
+        armed_fn = getattr(tel, "armed", None)
+        if armed_fn is None:
+            log("       [mav] telemetry.armed unavailable — external-disarm monitor off")
+            return
+        try:
+            async for armed in armed_fn():
+                if not self.monitoring:
+                    break
+                self.px4_armed = bool(armed)
+                if self.expect_armed and not self.px4_armed and not self.aborted:
+                    log("!!! PX4 reports DISARMED while we expect armed (kill switch / failsafe?) — aborting sequence !!!")
+                    self.event("external_disarm", "PX4 armed=False during sequence")
+                    self.expect_armed = False
+                    self.streaming = False
+                    self.aborted = True
+                    self.abort_reason = "EXTERNAL DISARM (kill switch / failsafe) — sequence stopped"
+                    self.geofence.disarm()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log("       [mav] armed monitor stopped: {!r}".format(e))
+
+    async def _mavsdk_lag_monitor(self):
+        """odometry.time_usec(PX4 시각) 와 수신 시각의 오프셋으로 소비 지연을 잰다. 기준선 = 지금까지의 최소 오프셋.
+        지연 > warn: MAVSDK 기반 판정 보류(+이벤트). 지연 > abort(offboard 중): 비상 착륙. SITL 은 시뮬 시계라 건너뛴다."""
+        if self.sim:
+            return
+        tel = self.drone.telemetry
+        odom_fn = getattr(tel, "odometry", None)
+        if odom_fn is None:
+            log("       [mav] telemetry.odometry unavailable — lag monitor off")
+            return
+        t_start = self.now()
+        try:
+            async for od in odom_fn():
+                if not self.monitoring:
+                    break
+                tu = getattr(od, "time_usec", None)
+                if tu is None or tu <= 0:
+                    continue
+                now = self.now()
+                off = now - tu / 1e6
+                if self._mav_lag_base is None or off < self._mav_lag_base:
+                    self._mav_lag_base = off
+                self.mav_lag_s = max(0.0, off - self._mav_lag_base)
+                if now - t_start >= self.cfg.mav_lag_calib_s:
+                    self.mav_lag_known = True
+                self._extra_sync["mav_lag_s"] = round(self.mav_lag_s, 3)
+                if self.mav_lag_known and self.mav_lag_s > self.cfg.mav_lag_warn_s and not self._mav_lag_warned:
+                    self._mav_lag_warned = True
+                    log("       [mav] telemetry lag {:.2f}s > {:.2f}s — MAVSDK-based checks suspended".format(self.mav_lag_s, self.cfg.mav_lag_warn_s))
+                    self.event("mav_lag", "{:.2f}s".format(self.mav_lag_s))
+                elif self._mav_lag_warned and self.mav_lag_s <= self.cfg.mav_lag_warn_s / 2.0:
+                    self._mav_lag_warned = False
+                    log("       [mav] telemetry lag recovered ({:.2f}s)".format(self.mav_lag_s))
+                if self.mav_lag_known and self.offboard_active and self.mav_lag_s > self.cfg.mav_lag_abort_s:
+                    asyncio.ensure_future(self.trigger_emergency_land(
+                        "MAVSDK TELEMETRY LAG {:.1f}s (monitors blind)".format(self.mav_lag_s)))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log("       [mav] lag monitor stopped: {!r}".format(e))
 
     def _check_estimator_disagreement(self):
         """reach 파이프(VIO 경로) 와 MAVSDK(EKF) 상대 위치가 갈라지면 비상 착륙 (P3). 사고 때 1 s 만에 0.58 m 벌어졌다."""
         cfg = self.cfg
         if not cfg.vio_gate or not self.offboard_active or self.aborted:
+            return
+        if not self.mav_fresh() or self.now() - self._last_mav_update_time > 0.5:
+            self._est_disagree_since = None       # 지연/정지된 MAVSDK 와 비교하면 가짜 불일치가 난다 (2026-11-10 2차 사고)
             return
         fb = self.feedback_state()
         if fb is None or fb["age_sec"] > 0.5:
@@ -570,6 +742,10 @@ class Vehicle(object):
 
         self.stream_task = asyncio.ensure_future(self._setpoint_streamer())
         self.mav_task = asyncio.ensure_future(self._mavsdk_position_monitor())
+        if not self.sim:
+            self.mav_stream_task = asyncio.ensure_future(self._mavsdk_position_stream())
+        self.mav_lag_task = asyncio.ensure_future(self._mavsdk_lag_monitor())
+        self.armed_task = asyncio.ensure_future(self._armed_monitor())
         self.health_task = asyncio.ensure_future(self._health_monitor())
         if self.sim:
             self.voxl_tasks.append(asyncio.ensure_future(
@@ -597,6 +773,7 @@ class Vehicle(object):
         log("[6/7] Arming...")
         await self.drone.action.arm()
         self.event("armed")
+        self.expect_armed = True
         await asyncio.sleep(1.0)
 
         if self.sim:
@@ -1208,6 +1385,7 @@ class Vehicle(object):
         return True
 
     async def land_and_disarm(self):
+        self.expect_armed = False          # 착륙·disarm 은 우리가 명령한 것 (외부 disarm 감시 해제)
         log("[7/7] Landing...")
         self.geofence.disarm()                  # 착륙은 setpoint 를 따르지 않으므로 먼저 끈다
         self.event("land_cmd")
@@ -1260,6 +1438,7 @@ class Vehicle(object):
             if self._emergency_triggered:
                 return
             self._emergency_triggered = True
+        self.expect_armed = False          # 이후 PX4 disarm 은 우리가 유도한 것
         self.geofence.disarm()
         log("!!! EMERGENCY LAND TRIGGERED: {} !!!".format(reason))
         self.event("emergency_land", reason)
@@ -1291,7 +1470,7 @@ class Vehicle(object):
     async def cancel_background_tasks(self):
         self.streaming = False
         self.monitoring = False
-        tasks = [self.stream_task, self.mav_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
+        tasks = [self.stream_task, self.mav_task, self.mav_stream_task, self.mav_lag_task, self.armed_task, self.status_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
         for task in tasks:
             if task and not task.done():
                 task.cancel()
@@ -1356,6 +1535,9 @@ class Vehicle(object):
             "reach_pipe": self.reach_pipe,
             "aborted": self.aborted, "abort_reason": self.abort_reason,
             "vio_gate": self.vio_gate_result, "vio_samples": self.vio.n, "vio_bad_episodes": self.vio.n_bad_episodes,
+            "mav_lag_s": self.mav_lag_s, "mav_lag_known": self.mav_lag_known, "mav_updates": self.mav_update_count,
+            "px4_armed_last": self.px4_armed,
+            "px4_msgs": [(round(t, 2), typ, txt) for (t, typ, txt) in list(self.px4_msgs)[-40:]],
             "results": self.results, "snapshots": self.snapshots,
             "config": self.cfg.as_dict(),
         }

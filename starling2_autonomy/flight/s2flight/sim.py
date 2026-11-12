@@ -99,6 +99,9 @@ async def sim_pose_task(vehicle, pipe_names, is_running, errors, period_s=0.05):
         while is_running():
             pv = state["pv"]
             if pv is not None:
+                upd = getattr(vehicle, "update_mav_position", None)
+                if upd is not None:
+                    upd(pv)                 # SITL: MAVSDK 위치도 여기서 갱신 (두 번째 구독은 데이터를 못 받는다)
                 parsed = telemetry_to_pose(pv, state["att"], state["av"])
                 for p in pipes:
                     vehicle.update_pose(p, dict(parsed))

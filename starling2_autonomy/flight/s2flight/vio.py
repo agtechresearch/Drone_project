@@ -109,7 +109,8 @@ async def vio_reader_task(pipe_name, sink, is_running, errors):
                 line = raw.decode("utf-8", errors="replace").strip()
                 parsed = parse_voxl_inspect_vio_line(line)
                 if parsed is None:
-                    if "ERROR" in line.upper():
+                    up = line.upper()
+                    if "ERROR" in up and "ERROR_CODES" not in up:
                         errors["vio:" + pipe_name] = line
                     continue
                 sink(stamp(parsed))

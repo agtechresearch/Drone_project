@@ -4,8 +4,9 @@
 설계서 `docs/09_marker_drift_experiment_plan.md` 와 랩미팅 요약 `_brief.md` 는 "무엇을 할 것인가", 이 문서는 "실제로 무엇이 일어났는가".
 새 항목은 **§1 진행 기록** 끝에 날짜로 추가하고, 코드가 바뀌면 §2 패치노트, 문제를 겪으면 §3 트러블슈팅에도 한 줄씩 남긴다.
 
-**현재 상태 (2026-11-10 낮):** **실기 점검 비행 T1 사고(이륙 중 VIO 끊김 → 천장 근접 → 충돌) — 비행 금지.** 코드 v0.1.6 배포됨, 손 검출 시험 통과, SITL 21회 통과.
-남은 관문: 사고 대책 P1~P6 구현·SITL 검증 → 기체 외관 점검 → 사용자 허락 → 낮은 고도 점검 비행 → 파일럿.
+**현재 상태 (2026-11-10 밤):** 실기 사고 2건(1차 이륙 중 VIO 끊김·추측항법 상승 / 2차 MAVSDK 지연에 의한 가짜 불일치 착륙 + 추락 후 미재부팅). **비행 금지.**
+v0.2.1 완성(VIO 게이트·감시, MAVSDK 지연 수정·감시, 외부 disarm 감시, PX4 메시지 게이트, 시뮬 MAVSDK 모니터 수정) — 단위테스트 181/181, SITL 통과, **기체 배포 대기**(기체 꺼짐).
+남은 관문: 기체 켜기 → v0.2.1 배포 → 외관 점검 → **장소 검증(vio_check 들고 이동)** → 재부팅 상태에서 §4a 절차 → 사용자 "시작" → 0.4 m 점검 비행.
 
 ---
 
@@ -95,6 +96,15 @@
 
 **비행 금지.** 원인 분석이 끝나고 아래 대책이 코드·절차에 들어가 사용자가 다시 허락하기 전까지 arm 하지 않는다.
 
+> **정정 (같은 날 저녁, 사용자 터미널 전문 확인 후):** 아래 타임라인의 콘솔 시각(12:28:17~12:29:04, 폴더 `122109_T1`)은 **사고 비행이 아니라 추락 직후의 재시도**다.
+> 실제 사고 비행은 **12:27:47 arm, 폴더 `20261110_122731_T1`**, PX4 `log100.ulg`(이 로그는 처음부터 맞게 골랐으므로 물리적 결론은 그대로).
+> 정정되는 사실: ① 사고 비행 **전** VIO 는 12:22:22 부터 5 분 넘게 GOOD 이었다("arm 전 리셋 2회·정지 드리프트 0.45 m" 는 추락 뒤 재시도 때 값) → **VIO 게이트만으로는 1차 사고를 못 막았을 것**,
+> 핵심은 비행 중 0.5 s 감시와 MAVSDK 지연 수정(v0.2.1). ② 사고 비행 콘솔(사용자 터미널): 12:27:48 이륙 → 12:27:51.65 파이프 기준 0.58 m REACHED → 12:27:53.67 파이프 U **+1.90**(VIO 복귀 리셋) →
+> 12:27:55 킬 스위치 → 코드는 그 뒤로도 회전 단계를 계속, 12:28:05 지오펜스(가짜 데이터) → "착륙". ③ 12:28:33 재시도에서 킬 스위치로 1 s 만에 disarm 됐는데
+> **코드가 외부 disarm 을 감지하지 못해 30 s 동안 시퀀스를 계속**(그 콘솔이 `122109_T1`) → v0.2.1 `_armed_monitor` 추가. ④ mavsdk_server 의 `[Debug] MAVLink:` 출력은
+> 터미널에만 나오고 파일에 안 남는다 → 치트시트에 로그 리다이렉트 추가. 폴더 `122731_T1` 과 voxl-logger `log0003` 은 기체가 꺼져 있어 다음 접속 때 회수.
+
+
 **타임라인** (기체 시각; 로그 `marker_drift_logs/20261110_122109_T1`, PX4 `sess179/log100.ulg`, voxl-logger `log0004`, 사본 `C:\Users\ericj\sim_logs\marker_drift\real_20261110\`)
 
 | 시각 | 사건 | 근거 |
@@ -124,6 +134,7 @@
 2. **프리플라이트가 VIO 품질을 보지 않는다.** `is_local_position_ok`(PX4 EKF 관점) 와 MAVSDK 위치 범위만 본다. EKF 는 VIO 가 끊겨도 추측항법 중엔 OK 를 유지한다.
    파이프(`px4_vehicle_local_position`, vision-hub) 와 MAVSDK 위치가 시작부터 0.39 m 어긋나 있었고 그 뒤 1 m 이상 벌어졌지만 비교하지 않았다.
 3. **지오펜스가 EKF(MAVSDK) 위치만 본다.** EKF 가 "0.6 m 도달" 이라고 믿었으므로 수직 편차 1.5 m 는 걸리지 않았다. 파이프 쪽은 −1.2 m 까지 벌어졌지만 지오펜스 입력이 아니다.
+   **[2차 사고 분석 뒤 추가]** 게다가 그 MAVSDK 값은 소비 지연으로 6~8 s 과거 값이었다(v0.2.1 항목).
 4. **비행 중 VIO 품질 감시 없음.** `vehicle_visual_odometry.quality`/open-vins 상태가 −1/BAD 로 바뀌어도 코드가 알 수 없다.
 5. 부하: 같은 시점에 voxl-logger(hires 30 fps jpg) 시작, 태그 검출기 15 Hz(오늘 skip 5→1), 포즈 리더 2개. VIO 저하와 시간이 겹치나 인과는 미확정(CPU 총 28 %, 카메라 30 fps 유지).
    VIO 가 정지 상태에서도 features 0 으로 떨어진 것은 **전방 카메라 시야의 특징점 부족**(현수막·벽) 가능성이 크다.
@@ -158,16 +169,63 @@ CPU 28 %·35 °C. 서비스 모두 active. **프롭·암·카메라 렌즈·배�
 - **기체 현재 위치에서 `vio_check.py --seconds 8` 실행 → FAIL**: quality 최소 17 / 평균 71, features 6, 정지 드리프트 1 cm, 저널 리셋 0, PX4 quality 96.
   정지 상태에서도 품질이 17 까지 떨어지는 위치(충돌 후 책상 근처, 시야 특징점 부족 추정) — 게이트가 거부할 상태. 이륙 지점은 시야에 텍스처가 있는 곳으로.
 
+### 2026-11-10 (오후) — **2차 사고: v0.2.0 점검 비행, 이륙 직후 가짜 '추정기 불일치' 비상 착륙 → 착륙 중 앞-왼쪽으로 밀려 충돌**
+
+**타임라인** (`marker_drift_logs/20261110_131409_T1`, PX4 `sess179/log102.ulg`)
+
+| 시각 | 사건 |
+|---|---|
+| 13:14:26 | VIO 게이트 PASS(quality 94, features 19, 드리프트 1 cm) → arm |
+| 13:14:27 | offboard, 이륙 램프 0.15 m/s → 목표 0.40 m |
+| 13:14:28~29 | PX4 EKF 는 0.43 m 까지 정상 상승, reach 파이프도 +0.31→+0.40. **MAVSDK 텔레메트리는 0.00 에 고정** |
+| 13:14:29.5 | `_check_estimator_disagreement`: 파이프 0.40 vs MAVSDK 0.00 → **비상 착륙** (가짜 불일치) |
+| 13:14:29.8~31 | PX4 Land 중 VIO quality 60→4 붕괴, EV 위치 1 m 점프, 기체 앞-왼쪽 ~1 m 이동 → 충돌. 13:14:31 킬 |
+
+**직접 원인: MAVSDK 텔레메트리 소비 지연.** 기체에서 실측: `position_velocity_ned` 도착 30 msg/s, 비행 코드 루프(메시지마다 `sleep(0.05)`)는 18.5 msg/s 소비
+→ gRPC 버퍼에 밀려 **초당 0.41 s 씩 과거로** (6 s 측정에 2.46 s 지연). 이륙 시점 MAVSDK 값은 2~3 s 전 "지상" 값이었다.
+v14 부터 같은 구조였고, **1차 사고 때도 MAVSDK 가 6~8 s 지연**돼 있었다(파이프 점프 12:28:41/44 가 MAVSDK 에 12:28:49/54 에 나타남) → 지오펜스가 침묵한 또 하나의 이유.
+SITL 에서는 전송률·소비 속도가 달라 드러나지 않았다.
+
+**환경 요인**: 착륙 1.3 s 동안 VIO 가 붕괴(프롭 바람·바닥·책상 주변 시야). 사용자의 **수동(Position) 비행도 같은 방향으로 밀림** → 로그 비교:
+11-05 정상 비행에도 모터 비대칭 22 %·롤 1.5° 바이어스가 있었으나 드리프트 8 cm/51 s 였으므로 추력 비대칭은 원인이 아니다.
+오늘 Position 비행에서 EKF 는 "오른쪽 1.1 m 이동" 이라 믿었는데 VIO 속도는 ~0 → VIO 위치가 흘러가고 제어기가 반대로 밀어 실제로 왼쪽 이동.
+VIO 불안정(BAD/리셋)은 1차 충돌 전 12:22 부터 있었다 → **오늘 이 장소의 시야 문제**(흰 현수막 70 cm, 책상, 조명) 가 유력. 카메라 손상은 다른 장소에서 손 검증 뒤 판단.
+
+**대책 (v0.2.1)**
+- `_mavsdk_position_monitor` 가 메시지마다 쉬지 않고 전부 소화, 무거운 처리만 0.05 s 간격. `set_rate_position_velocity_ned/odometry(20)` 요청.
+- `_mavsdk_lag_monitor`: `odometry.time_usec`(PX4 시각) 와 수신 시각 차의 최소값을 기준선으로 지연을 잰다. 지연 > 0.3 s → MAVSDK 기반 판정(지오펜스·불일치) 보류·이벤트, 게이트 거부; offboard 중 > 2.0 s → 비상 착륙.
+- 지오펜스 입력을 실시간 reach 파이프(명령 프레임)로 전환(없으면 신선한 MAVSDK). 불일치 판정은 MAVSDK 가 신선할 때만.
+- `capture_initial_mavsdk_position` 도 쉬지 않고 소화(시간 창).
+- 절차: 비행 전 **장소 검증** — 후보 지점에서 `vio_check.py --seconds 30` 을 기체를 들고 천천히 움직이며 실행, 이동 중에도 quality ≥ 50·features ≥ 10 유지되는 곳만 이륙 지점. 모든 곳에서 무너지면 카메라 점검.
+
 ### (다음 항목을 여기에 날짜로 추가)
 - [x] 기체: `tag_locations.conf` 0.20, `skip_n_frames` 1, voxl-tag-detector 기동 (2026-11-10 승인·적용)
 - [x] 손 검출 시험 (2026-11-10): x 오른쪽 +, σ_yaw 0.19° → `--align-tol 1.0`
-- [ ] v0.2.0 배포(`tools/deploy_pkg.sh flight/tools_onboard/vio_check.py`) → 기체 외관 점검(프롭·암·렌즈) → §4a 절차 → 사용자 "시작" → 낮은 점검 비행 → 태그 모드
+- [ ] v0.2.1 배포(`tools/deploy_pkg.sh -y` + `tools/deploy_pkg.sh -y flight/tools_onboard/vio_check.py`) → 외관 점검 → 장소 검증 → 재부팅 후 §4a → 사용자 "시작" → 0.4 m 점검 비행 → 태그 모드
+- [ ] 다음 접속 때 회수: `marker_drift_logs/20261110_122731_T1`(1차 사고 실제 콘솔), voxl-logger `log0003`
 - [ ] 실험장: 태그 0~9 부착 마무리(좌상단 꼭짓점 기준 500 mm, §4.1 표), 통로 B 폭(140 cm?), 상단열 C(같은 ID 0~9)
 - [ ] 태그 크기 20 cm 확인
 
 ---
 
 ## 2. 패치노트
+
+### v0.2.1 — MAVSDK 텔레메트리 지연 수정 (2026-11-10 오후, 2차 사고 대책)
+
+**수정**: `vehicle._mavsdk_position_monitor` 소비 루프의 `sleep(0.05)` 제거(전부 소화, 처리만 20 Hz 제한). `capture_initial_mavsdk_position` 시간 창 방식.
+**추가**: `_request_mav_rates`(PX4 전송률 20 Hz 요청), `_mavsdk_lag_monitor`(odometry time_usec 기준 지연, `mav_lag_s`), `mav_fresh()`, 게이트 조건 ⑤ 지연 ≤ 0.3 s,
+지오펜스 입력 = reach 파이프 우선, 불일치 판정은 MAVSDK 신선할 때만. config `mav_rate_hz` 20, `mav_lag_warn_s` 0.3, `mav_lag_abort_s` 2.0, `mav_lag_calib_s` 2.0 (+CLI).
+요약/sync 에 `mav_lag_s`. 테스트 6항목(60 Hz 스트림 추종, 지연 게이트 거부, 비행 중 지연 → 착륙 등).
+**추가 2**: `_armed_monitor` — `telemetry.armed()` 를 감시해 우리가 arm 한 상태에서 PX4 가 disarm(킬 스위치·failsafe)이면 즉시 시퀀스 중단·이벤트 `external_disarm`
+(1차 사고 재시도에서 킬 뒤 30 s 계속 진행한 결함). `vio_reader_task` 헤더 줄 오인(error_codes) 수정. 테스트 4항목 추가.
+**추가 3**: `_status_text_monitor` — PX4 STATUSTEXT 를 모아 이벤트 `px4_msg` 로 기록, 게이트 조건 ⑥ 최근 `px4_msg_quiet_s`(30 s) 안에 'Preflight Fail'·'Accelerometer Bias'·
+'estimate error'·'Attitude failure'·'Flight termination'·'Kill switch' 등이 있으면 arm 거부(추락 뒤 재부팅 없이 날았던 상황 대응, `--px4-msg-quiet-sec 0` 으로 끔). 테스트 3항목.
+**구조 수정 (발견: SITL 에서 MAVSDK 위치 모니터가 한 번도 갱신되지 않았음)**: `sim_pose_task` 가 같은 `position_velocity_ned` 스트림을 먼저 구독하면 두 번째 구독(모니터)은
+데이터를 못 받는다 → v0.1.4·v0.2.0 의 SITL 검증에서 지오펜스·불일치 감시는 **실제로 돌지 않았다**(sync.csv `mav_updates 0`). 스트림 소비(`_mavsdk_position_stream`, 실기만)와
+주기 처리(`_mavsdk_position_monitor`, 0.05 s: 기록·지오펜스·불일치)를 분리하고, SITL 은 `sim_pose_task` 가 `update_mav_position` 을 호출. 초기 위치 캡처 뒤 구독 `aclose()`.
+
+**검증**: 단위테스트 **181/181**. SITL(v0.2.1 최종): A9 `20261110_225503_i2` 게이트 PASS → 왕복 STOPPED → 완료, **MAVSDK 위치 모니터 갱신 확인**(mav_updates 515, mav_u 가 fb_u 추종, est_dv 최대 0.003 m);
+V4 `20261110_225518_i3` offboard +20 s VIO 상실 → 0.5 s 뒤 EMERGENCY LAND → 착륙. 기체 배포는 다음 전원 투입 때(기체 꺼짐).
 
 ### v0.2.0 — 이륙 사고 대책: VIO 게이트·감시·추정기 불일치·이륙 거부 (2026-11-10 오후)
 
@@ -342,6 +400,17 @@ CPU 28 %·35 °C. 서비스 모두 active. **프롭·암·카메라 렌즈·배�
 - 원인: stdin 이 cp949 로 읽힌다. 경로의 `\U` 도 이스케이프로 해석.
 - 조치: 스크립트는 파일로 저장해 실행하거나 Write 도구로 직접 쓴다. 서버(리눅스)에서는 문제 없음.
 
+**SITL 에서 MAVSDK 위치 모니터가 전혀 갱신되지 않음 (`mav_updates 0`, 2026-11-10 저녁 발견)**
+- 증상: 모든 SITL sync.csv 에서 `mav_rel_*` 0 고정, `mav_updates` 0. 실기에서는 갱신됨.
+- 원인: SITL 에서는 `sim_pose_task` 가 `position_velocity_ned` 를 먼저 구독한다. MAVSDK-Python 0.12 + mavsdk_server 1.4 에서 같은 스트림의 두 번째 구독이 데이터를 받지 못했다.
+  → 지오펜스·불일치 감시가 SITL 검증에서 꺼진 채 "통과" 로 보였다.
+- 조치: v0.2.1 구조 수정(위). 검증 기준에 **sync.csv `mav_updates` > 0, `mav_rel_u` 가 `fb_rel_u` 를 따라감** 을 추가. 같은 스트림을 두 곳에서 구독하지 말 것.
+
+**MAVSDK 위치가 몇 초 전 값이다 / 파이프와 MAVSDK 가 갈라진다 (2026-11-10 1·2차 사고)**
+- 증상: `_sync.csv` 에서 `mav_rel_*` 가 `fb_rel_*` 를 수 초 늦게 따라감. 실기 측정: 30 msg/s 입력, `sleep(0.05)` 루프 18.5 msg/s 소비, 지연 +0.41 s/s.
+- 원인: MAVSDK-Python 의 async 스트림은 소비가 느리면 버퍼링(드롭 아님). 메시지마다 sleep 하는 루프는 입력률보다 느리면 반드시 밀린다.
+- 조치: v0.2.1. 스트림 루프엔 sleep 을 두지 말 것. 지연은 `odometry.time_usec` 로 잰다(`mav_lag_s`). SITL 은 시뮬 시계라 지연 감시 생략.
+
 **arm 직후 `Offboard FAILED: NO_SETPOINT_SET` → 비상정지 (2026-11-10, SITL 인스턴스 4, 서버 load 28)**
 - 증상: priming 3 s 동안 20 Hz setpoint 스트림이 돌았는데도 `offboard.start()` 가 NO_SETPOINT_SET. 기체는 지상 arm 상태에서 착륙 명령·disarm 으로 정리됨.
 - 원인: 과부하로 lockstep 시뮬·mavsdk_server 가 지연돼 PX4 가 최근 setpoint 를 못 본 것으로 판단(병렬 3 인스턴스 + 타 사용자 Gazebo). 같은 코드가
@@ -384,7 +453,7 @@ CPU 28 %·35 °C. 서비스 모두 active. **프롭·암·카메라 렌즈·배�
 
 ```bash
 ssh starling2_lab                                              # IP 바뀌면 메모리 절차로 스윕 (hostkey IIh6B2Siw…)
-pgrep -af mavsdk_server || (/home/mavsdk_server -p 50051 udp://:14551 &)   # 재부팅마다 수동. 없으면 비행 코드가 Connecting 에서 멈춘다
+pgrep -af mavsdk_server || (/home/mavsdk_server -p 50051 udp://:14551 > /home/root/mavsdk_server.log 2>&1 &)   # 재부팅마다 수동. 출력은 파일로(터미널에만 남던 MAVLink 메시지 보존)
 systemctl is-active voxl-tag-detector || systemctl start voxl-tag-detector  # 태그 모드일 때만. conf: id 0~10 size 0.20, skip 1, down 끔
 cd /home/root && PYTHONIOENCODING=utf-8 python3 vio_check.py --seconds 20   # ① 바닥에 둔 채 PASS 필요
 #   → 기체를 손으로 천천히 들어 30 cm 움직였다 제자리에 둔다
@@ -395,6 +464,8 @@ PYTHONIOENCODING=utf-8 python3 marker_drift_flight.py --no-align --stop-mode dis
 #   비행 코드가 arm 직전 VIO 게이트를 다시 본다. 'vio-gate FAIL' 이면 arm 하지 않고 exit 3.
 ```
 이륙 지점: 전방 카메라 시야에 텍스처(가구·마커·벽 무늬)가 있어야 한다. 흰 벽·현수막만 보이면 특징점 0 → 게이트 FAIL.
+**추락·킬 스위치·강한 충격 뒤에는 반드시 기체 재부팅** → 3~5 분 대기 → vio_check (EKF 가속도계 바이어스·VIO 상태가 남아 다음 비행을 밀어낸다, 2026-11-10 2차 사고).
+장소 검증: 후보 지점에서 `vio_check.py --seconds 30` 을 기체를 들고 50 cm 쯤 천천히 움직이며 실행 — 이동 중에도 quality ≥ 50·features ≥ 10 유지되는 곳만 이륙 지점.
 
 ### 4b. 서버 실행 (이 PC 에서)
 

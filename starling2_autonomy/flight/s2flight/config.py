@@ -56,6 +56,17 @@ class FlightConfig(object):
     feedback_stale_abort_s = 1.0     # reach 파이프가 이보다 오래 안 오면 비상 착륙 (기존 0.8 s 는 경고만)
     takeoff_fb_max_offset_m = 0.15   # 이륙 직전 파이프/MAVSDK 상대 위치가 원점에서 이보다 멀면 이륙 거부 (사고 때 0.45 m)
 
+    # MAVSDK 텔레메트리 지연 (2026-11-10 2차 사고: 소비 루프가 30 Hz 스트림을 18 Hz 로만 읽어 위치가 초당 0.4 s 씩 과거로 밀림)
+    mav_rate_hz = 20.0               # PX4 에 요청하는 position_velocity_ned / odometry 전송률
+    mav_lag_warn_s = 0.3             # odometry time_usec 기준 지연이 이보다 크면 MAVSDK 기반 판정(지오펜스·불일치) 보류 + 게이트 거부
+    mav_lag_abort_s = 2.0            # 비행 중 지연이 이보다 크면 비상 착륙 (감시가 눈을 감은 상태)
+    mav_lag_calib_s = 2.0            # 지연 기준선(최소 오프셋) 수집 시간
+
+    # PX4 STATUSTEXT 감시 (2026-11-10: 추락 뒤 재부팅 없이 날아 'High Accelerometer Bias'·'Attitude failure' 사전점검 실패가 떠 있었다)
+    px4_msg_quiet_s = 30.0           # 게이트: 최근 이 시간 안에 아래 패턴의 PX4 메시지가 있으면 arm 거부. 0 = 끔
+    px4_msg_bad_patterns = ("Preflight Fail", "Accelerometer Bias", "estimate error", "Attitude failure",
+                            "Flight termination", "Kill switch", "velocity unstable", "height estimate not stable")
+
     # 지오펜스 (v14)
     no_geofence = False
     max_horizontal_dev = 2.5
@@ -177,6 +188,11 @@ class FlightConfig(object):
         s.add_argument("--vio-stale-abort-sec", dest="vio_stale_abort_s", type=float, default=FlightConfig.vio_stale_abort_s)
         s.add_argument("--feedback-stale-abort-sec", dest="feedback_stale_abort_s", type=float, default=FlightConfig.feedback_stale_abort_s)
         s.add_argument("--takeoff-fb-max-offset", dest="takeoff_fb_max_offset_m", type=float, default=FlightConfig.takeoff_fb_max_offset_m)
+        s.add_argument("--mav-rate-hz", dest="mav_rate_hz", type=float, default=FlightConfig.mav_rate_hz)
+        s.add_argument("--mav-lag-warn-sec", dest="mav_lag_warn_s", type=float, default=FlightConfig.mav_lag_warn_s)
+        s.add_argument("--mav-lag-abort-sec", dest="mav_lag_abort_s", type=float, default=FlightConfig.mav_lag_abort_s)
+        s.add_argument("--px4-msg-quiet-sec", dest="px4_msg_quiet_s", type=float, default=FlightConfig.px4_msg_quiet_s,
+                       help="최근 이 시간 안 PX4 'Preflight Fail' 등 메시지가 있으면 arm 거부. 0 = 끔")
         g.add_argument("--offboard-start-retries", type=int, default=FlightConfig.offboard_start_retries,
                        help="offboard 시작 거부(NO_SETPOINT_SET 등) 시 재시도 횟수. 0 = 즉시 비상정지(v14 동작)")
         g.add_argument("--offboard-retry-sec", type=float, default=FlightConfig.offboard_retry_sec)

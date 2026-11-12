@@ -80,7 +80,11 @@ class FakeDrone(object):
         self.action = _Obj(arm=self._arm, land=self._land, disarm=self._disarm, kill=self._kill)
         self.core = _Obj(connection_state=self._conn)
         self.telemetry = _Obj(health=self._health, position_velocity_ned=self._pos, in_air=self._in_air,
-                              attitude_euler=self._att)
+                              attitude_euler=self._att, odometry=self._odom, armed=self._armed_stream,
+                              status_text=self._status_text)
+        self.status_texts = []          # (type, text) 를 넣어 두면 스트림이 한 번씩 내보낸다
+        self.odom_lag_s = 0.0          # odometry time_usec 를 이만큼 과거로 찍어 MAVSDK 소비 지연을 흉내
+        self.pos_period = 0.05         # position_velocity_ned 발행 주기 (20 Hz 기본; 60 Hz 로 올려 소비 루프를 시험)
         self.vehicle = None
         self.cmd_log = []
         self.ts_ms = 0.0
@@ -159,13 +163,33 @@ class FakeDrone(object):
             yield _Obj(is_local_position_ok=True)
             await asyncio.sleep(0.02)
 
+    async def _status_text(self):
+        sent = 0
+        while True:
+            while sent < len(self.status_texts):
+                typ, text = self.status_texts[sent]
+                sent += 1
+                yield _Obj(type=typ, text=text)
+            await asyncio.sleep(0.05)
+
+    async def _armed_stream(self):
+        while True:
+            yield self.armed
+            await asyncio.sleep(0.05)
+
+    async def _odom(self):
+        while True:
+            yield _Obj(time_usec=int((time.monotonic() - self.odom_lag_s) * 1e6),
+                       position_body=_Obj(x_m=self.n, y_m=self.e, z_m=self.d))
+            await asyncio.sleep(0.05)
+
     async def _pos(self):
         while True:
             self.push_pose()
             j = (random.random() - 0.5) * 0.002          # 1 mm 지터: 실제 EKF 처럼 완전히 같은 값이 반복되지 않게
             yield _Obj(position=_Obj(north_m=self.n + j, east_m=self.e - j, down_m=self.d + j),
                        velocity=_Obj(north_m_s=0.0, east_m_s=0.0, down_m_s=0.0))
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(self.pos_period)
 
     async def _in_air(self):
         while True:
@@ -294,7 +318,7 @@ def fast_cfg(**kw):
                 yaw_tol=3.0, yaw_stable_time=0.2, takeoff_speed=2.0, takeoff_hover_time=0.2,
                 preland_alt=0.2, preland_speed=2.0, preland_hover_time=0.2, pos_ok_hold_sec=0.1,
                 reach_pipe_timeout=3.0, csv_sample_sec=0.2, geofence_violation_sec=0.3,
-                vio_gate_window_s=0.4, vio_quiet_s=0.0, vio_bad_abort_s=0.3, est_disagree_s=0.3)
+                vio_gate_window_s=0.4, vio_quiet_s=0.0, vio_bad_abort_s=0.3, est_disagree_s=0.3, mav_lag_calib_s=0.15)
     base.update(kw)
     return FlightConfig(**base)
 
@@ -878,6 +902,8 @@ try:
        and abs(seq["legs_settled"][0]["drift_along"] - seq["legs_settled"][0]["truth_along"] * 0.05 / 0.95) < 0.02 and seq["legs_settled"][0]["drift_along"] > 0.03,
        str([(l["status"], round(l["drift_along"], 3)) for l in seq["legs"]] + [round(l["drift_along"], 3) for l in seq["legs_settled"]]))
     ok("sim pose source used for reach", v.voxl_latest[v.reach_pipe]["raw"] == s2sim.SIM_RAW)
+    ok("sim mode: MAVSDK position monitor fed by sim_pose_task (mav_updates > 0, tracks fake)",
+       v.mav_update_count > 20 and abs(v.mav_z - drone.d) < 0.1, "updates %d mav_z %.3f fake %.3f" % (v.mav_update_count, v.mav_z, drone.d))
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1042,6 +1068,111 @@ try:
     drone.vio_quality = 10
     v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(vio_gate=False), fast_params(do_align=False, stop_mode="distance"), None, tmp))
     ok("--no-vio-gate skips the gate (disabled) and flies", v.vio_gate_result["passed"] is None and seq["completed"])
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# 11c. MAVSDK telemetry lag (2026-11-10 second incident): consumer must keep up; lag gate; fresh-only decisions
+# ---------------------------------------------------------------------------
+
+print("\n[mavsdk lag]")
+tmp = tempfile.mkdtemp(prefix="s2f_")
+try:
+    # (a) 60 Hz 위치 스트림을 소비 루프가 따라가는가: 비행 후 MAVSDK 위치가 실제(fake)와 일치, 지연 ~0, 가짜 불일치 없음
+    drone = FakeDrone()
+    drone.pos_period = 1.0 / 60.0
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("60 Hz position stream: flight completes, no false disagreement", seq["completed"] and not v.aborted, str(v.abort_reason))
+    ok("60 Hz position stream: MAVSDK position tracks the vehicle at the end (|d| < 0.05 m)",
+       abs(v.mav_z - drone.d) < 0.05 and abs(v.mav_x - drone.n) < 0.05, "mav %.3f/%.3f fake %.3f/%.3f" % (v.mav_x, v.mav_z, drone.n, drone.d))
+    ok("lag monitor: odometry present -> lag known and ~0", v.mav_lag_known and v.mav_lag_s < 0.1, "lag %.3f known %s" % (v.mav_lag_s, v.mav_lag_known))
+    ok("gate result records mav_lag_s", v.vio_gate_result.get("mav_lag_s") is not None)
+
+    # (b) 지연 1.0 s 인 odometry -> 게이트 거부 (arm 없음)
+    drone = FakeDrone()
+    drone.odom_lag_s = 0.0
+    _st = {"t0": None}
+    def _grow_lag(d):
+        # 기준선은 처음 값으로 잡히므로, 그 뒤 지연을 1.0 s 로 키운다
+        if _st["t0"] is None:
+            _st["t0"] = time.monotonic()
+        elif time.monotonic() - _st["t0"] > 0.25:
+            d.odom_lag_s = 1.0
+    drone.on_step = _grow_lag
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(vio_gate_window_s=0.8), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("MAVSDK lag 1.0 s -> gate FAIL, never armed", err is not None and "lag" in str(err) and "arm" not in drone.cmd_log, str(err))
+
+    # (c) 비행 중 MAVSDK 지연이 커지면 불일치 판정을 보류한다 (파이프만 갈라져도 지연 중엔 착륙하지 않음) + 지연 > abort 면 착륙
+    drone = FakeDrone()
+    _st2 = {"t": None}
+    def _lag_inflight(d):
+        if d.in_air_flag and _st2["t"] is None:
+            _st2["t"] = time.monotonic()
+        if _st2["t"] is not None and time.monotonic() - _st2["t"] > 0.2:
+            d.odom_lag_s = 3.0                      # 소비 지연 3 s 흉내 (> abort 2.0)
+    drone.on_step = _lag_inflight
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("in-flight MAVSDK lag > abort -> emergency land with LAG reason", v.aborted and "LAG" in (v.abort_reason or ""), str(v.abort_reason))
+    ok("mav_lag event recorded", any(e["event"] == "mav_lag" for e in rec.events))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# 11d. external disarm (kill switch) must stop the sequence immediately
+# ---------------------------------------------------------------------------
+
+print("\n[external disarm]")
+tmp = tempfile.mkdtemp(prefix="s2f_")
+try:
+    drone = FakeDrone()
+    _k = {"t": None}
+    def _kill_mid(d):
+        if d.in_air_flag and _k["t"] is None:
+            _k["t"] = time.monotonic()
+        if _k["t"] is not None and time.monotonic() - _k["t"] > 0.3 and d.armed:
+            d.armed = False                       # 조종자 킬 스위치
+            d.cmd_log.append("KILL_SWITCH")
+    drone.on_step = _kill_mid
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("external disarm -> aborted with EXTERNAL DISARM reason", v.aborted and "EXTERNAL DISARM" in (v.abort_reason or ""), str(v.abort_reason))
+    ok("external disarm -> no stages continued after the kill",
+       all(r["status"] not in ("OK", "REACHED_POOR_DELTA") for r in v.results[1:]) if len(v.results) > 1 else True,
+       str([(r["name"], r["status"]) for r in v.results]))
+    ok("external_disarm event recorded", any(e["event"] == "external_disarm" for e in rec.events))
+    # 정상 비행에서는 우리가 명령한 disarm 이 외부 disarm 으로 오인되지 않는다 (이전 섹션들의 completed 비행들이 증거) -> 명시 확인
+    drone = FakeDrone()
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("own land/disarm is not flagged as external disarm", seq["completed"] and not any(e["event"] == "external_disarm" for e in rec.events))
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# 11e. PX4 STATUSTEXT gate: recent 'Preflight Fail' (post-crash bias) refuses arm
+# ---------------------------------------------------------------------------
+
+print("\n[px4 statustext gate]")
+tmp = tempfile.mkdtemp(prefix="s2f_")
+try:
+    drone = FakeDrone()
+    drone.status_texts.append(("CRITICAL", "Preflight Fail: High Accelerometer Bias"))
+    err = None
+    try:
+        loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    except vehicle.PreflightAbort as e:
+        err = e
+    ok("recent 'Preflight Fail' statustext -> gate FAIL, never armed", err is not None and "PX4 reported" in str(err) and "arm" not in drone.cmd_log, str(err))
+    drone = FakeDrone()
+    drone.status_texts.append(("INFO", "Takeoff detected"))
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("benign statustext does not block; messages kept in summary", seq["completed"] and any("Takeoff detected" in m[2] for m in v.summary_dict()["px4_msgs"]))
+    drone = FakeDrone()
+    drone.status_texts.append(("CRITICAL", "Preflight Fail: High Accelerometer Bias"))
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(px4_msg_quiet_s=0.0), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    ok("--px4-msg-quiet-sec 0 disables the statustext gate", seq["completed"])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
