@@ -84,6 +84,7 @@ class FlightConfig(object):
     vio_min_rate_hz = 10.0           # 게이트: 게이트 창 VIO 상태 출력률 하한. OpenVINS 는 특징점이 많으면 매 2 프레임(15 Hz)로 떨어지는 게 정상(2026-11-12 실측: 특징점 19 → 15 Hz, 0 → 30 Hz) → 정지(stall)만 잡는다. 0 = 끔
     yaw_disagree_deg = 10.0          # 비행 중: EKF yaw - VIO yaw 가 offboard 시작 시점 대비 이만큼 벌어지면 착륙. 0 = 끔
     yaw_disagree_s = 0.5             # 비행 중: 위 조건 지속 시간
+    yaw_disagree_max_rate_dps = 45.0  # 비행 중: EKF yaw 속도가 이보다 크면(빠른 회전) 발산 판정 보류 (샘플 시각 차 때문)
 
     # 지오펜스 (v14)
     no_geofence = False

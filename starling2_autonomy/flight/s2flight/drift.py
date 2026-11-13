@@ -141,6 +141,7 @@ class DriftMonitor(TagFeed):
         self.table = table
         self.latest = {}                    # tag id -> (x_cam, z_cam, dx, s, recv_time, frame_ns)
         self.last_est = None
+        self._last_leg_log = 0.0
         self.leg = "pre"
         self.ref = None                     # 기준(t0): dict
         self.n_frames = 0
@@ -257,6 +258,21 @@ class DriftMonitor(TagFeed):
             return None
         return _stop
 
+    def standoff_guard(self, min_m, max_m, stale_s=None):
+        """Vehicle.move_until 용 predicate (v0.2.10). 태그 진실값 이격이 [min_m, max_m] 을 벗어나면 정지 사유를 돌려준다.
+        2026-11-13: 헤딩-위치 프레임 어긋남(±7~10°)으로 우측 이동 중 이격이 0.17 m/m 씩 변한다 → 현수막(또는 통로 B 벽)에 닿기 전에 레그를 끝낸다.
+        검출이 없거나 오래되면 None (판단 보류). max_m 에 inf 를 주면 하한만 본다."""
+        def _stop(now):
+            e = self.fresh_estimate(now, stale_s)
+            if e is None or e.truth_standoff != e.truth_standoff:
+                return None
+            if e.truth_standoff < min_m:
+                return "standoff guard: truth standoff {:.2f} m < {:.2f} (tags {})".format(e.truth_standoff, min_m, e.ids)
+            if e.truth_standoff > max_m:
+                return "standoff guard: truth standoff {:.2f} m > {:.2f} (tags {})".format(e.truth_standoff, max_m, e.ids)
+            return None
+        return _stop
+
     # -- 프레임 처리 -----------------------------------------------------------
 
     def _process(self, frame, now):
@@ -286,6 +302,11 @@ class DriftMonitor(TagFeed):
             self.v.set_sync_field("truth_along", est.truth_along)
             self.v.set_sync_field("err_along", row["err_along"])
             self.v.set_sync_field("err_standoff", row["err_standoff"])
+            if self.leg in ("out", "back") and now - self._last_leg_log >= 2.0:     # 비행 중 콘솔: 태그 기준 진실값과 오차 (2 s 마다)
+                self._last_leg_log = now
+                log("       [drift {}] tags {} psi {:+.1f} | truth along {:.2f} standoff {:.2f} | err along {:+.3f} standoff {:+.3f}".format(
+                    self.leg, est.n_tags, est.psi_deg if est.psi_deg == est.psi_deg else float("nan"), est.truth_along, est.truth_standoff,
+                    row["err_along"], row["err_standoff"]))
         else:
             row.update({"own_along": "", "own_along_b": "", "own_fwd": "", "own_up": "", "own_standoff": "", "fb_yaw_deg": "",
                         "err_along": "", "err_standoff": "", "yaw_drift_deg": ""})
@@ -313,6 +334,19 @@ class DriftMonitor(TagFeed):
             name, status, out["own_along_b"], out["truth_along"], out["drift_along"], out["own_standoff"], out["truth_standoff"],
             out["drift_standoff"]))
         return out
+
+
+def any_stop(*fns):
+    """여러 predicate 를 합친다: 먼저 사유를 돌려주는 것이 정지 사유 (v0.2.10)."""
+    def _stop(now):
+        for f in fns:
+            if f is None:
+                continue
+            r = f(now)
+            if r:
+                return r
+        return None
+    return _stop
 
 
 async def center_on_tag(vehicle, monitor, tag_id, tol_m=0.05, standoff_m=None, standoff_tol_m=0.05, max_iter=3,

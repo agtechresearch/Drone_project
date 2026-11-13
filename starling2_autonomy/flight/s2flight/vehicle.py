@@ -25,6 +25,7 @@ MAVSDK 객체는 생성자 drone= 으로 바꿔 끼울 수 있다(테스트용 �
 import asyncio
 import collections
 import math
+import os
 
 from .geofence import Geofence
 from .pose import pose_reader_task
@@ -78,6 +79,20 @@ class Vehicle(object):
         self.initial_yaw_deg = None if initial_yaw is None else yaw_to_360(initial_yaw)
         self.initial_yaw_source = None if initial_yaw is None else "arg"
         self.sim = bool(getattr(cfg, "sim", False) if sim is None else sim)   # SITL: 포즈 = MAVSDK 텔레메트리 (s2flight.sim)
+        # SITL 시험 훅 (v0.2.10, 2026-11-13): 명령 프레임의 '오른쪽' 을 헤딩에서 이만큼 돌린다 = 실기 헤딩-위치 프레임 어긋남(±7~10°) 재현.
+        # 실기(sim=False)에서는 값이 있어도 무시하고 경고만 낸다. 실험 보정용이 아님 — 이격 안전 정지 검증용.
+        self.sim_cmd_yaw_bias_deg = 0.0
+        _bias = os.environ.get("S2_SIM_CMD_YAW_BIAS_DEG", "")
+        if _bias:
+            try:
+                _b = float(_bias)
+            except ValueError:
+                _b = 0.0
+            if self.sim:
+                self.sim_cmd_yaw_bias_deg = _b
+                log("[sim] !!! TEST HOOK: command-frame yaw bias {:+.1f} deg (S2_SIM_CMD_YAW_BIAS_DEG) — 'right' is rotated from heading !!!".format(_b))
+            else:
+                log("[warn] S2_SIM_CMD_YAW_BIAS_DEG is set but this is a REAL vehicle — ignored")
         if drone is None:
             if System is None:
                 raise RuntimeError("mavsdk 가 없다. 기체에서 실행하거나 drone= 에 가짜를 넣을 것")
@@ -149,6 +164,11 @@ class Vehicle(object):
         self._touchdown_task = None
         self.landed_flag = False
         self.in_air_latest = None        # telemetry.in_air() 최신값 (_in_air_monitor, 구독 하나만)
+        self.flight_mode_latest = None   # telemetry.flight_mode() 최신값 이름 (_flight_mode_monitor)
+        self.mode_task = None
+        self._prev_mav_yaw = None
+        self._prev_mav_yaw_t = 0.0
+        self.mav_yaw_rate_dps = 0.0
         self._in_air_time = 0.0
         self.in_air_task = None
         self.expect_armed = False        # 우리가 arm 했고 아직 disarm 명령을 안 냈다
@@ -270,6 +290,8 @@ class Vehicle(object):
                     self.status_task = asyncio.ensure_future(self._status_text_monitor())
                 if self.att_stream_task is None and not self.sim:
                     self.att_stream_task = asyncio.ensure_future(self._mavsdk_attitude_stream())
+                if self.mode_task is None:
+                    self.mode_task = asyncio.ensure_future(self._flight_mode_monitor())
                 return
             await asyncio.sleep(0.1)
 
@@ -680,9 +702,13 @@ class Vehicle(object):
         y = float(getattr(att, "yaw_deg", float("nan")))
         if y != y:
             return
+        now = self.now()
+        if self._prev_mav_yaw is not None and now - self._prev_mav_yaw_t > 1e-3:
+            self.mav_yaw_rate_dps = angle_diff_deg(y, self._prev_mav_yaw) / (now - self._prev_mav_yaw_t)
+        self._prev_mav_yaw, self._prev_mav_yaw_t = y, now
         self.mav_yaw_deg = yaw_to_360(y)
         self.mav_yaw_count += 1
-        self._last_mav_yaw_time = self.now()
+        self._last_mav_yaw_time = now
 
     async def _mavsdk_attitude_stream(self):
         """attitude_euler 를 연결 직후부터 쉬지 않고 소화한다 (게이트의 정지 헤딩 드리프트 검사·비행 중 EKF-VIO yaw 비교)."""
@@ -704,6 +730,9 @@ class Vehicle(object):
         if vio_yaw != vio_yaw or self.mav_yaw_deg != self.mav_yaw_deg:
             return
         if now - self._last_mav_yaw_time > 0.5 or self.vio.age(now) > 0.5:
+            return
+        if abs(self.mav_yaw_rate_dps) > cfg.yaw_disagree_max_rate_dps:
+            self._yaw_disagree_since = None       # 빠른 회전 중엔 두 샘플의 시각 차가 각도 차로 보인다 — 정지/느린 회전에서만 판정
             return
         diff = angle_diff_deg(self.mav_yaw_deg, vio_yaw)
         if self._yaw_disagree_base is None:
@@ -839,6 +868,27 @@ class Vehicle(object):
                 self._check_heading_disagreement(now)
             await asyncio.sleep(0.1)
 
+    async def current_flight_mode(self, timeout_s=2.0):
+        """flight_mode 최신값 이름 ('POSCTL'/'OFFBOARD'/'LAND'...). 상시 모니터(_flight_mode_monitor, 연결 직후 시작)가 채운다.
+        같은 스트림을 두 번 구독하거나 열었다 닫는 일이 없도록 폴링만 한다 (MAVSDK-Python 0.12 구독 굶김 문제)."""
+        t0 = self.now()
+        while self.flight_mode_latest is None and self.now() - t0 < timeout_s:
+            await asyncio.sleep(0.05)
+        return self.flight_mode_latest or ""
+
+    async def _flight_mode_monitor(self):
+        fn = getattr(self.drone.telemetry, "flight_mode", None)
+        if fn is None:
+            return
+        try:
+            async for fm in fn():
+                name = getattr(fm, "name", None)
+                self.flight_mode_latest = str(name) if name else str(fm).split(".")[-1]
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log("       [mode] flight_mode monitor stopped: {!r}".format(e))
+
     async def _in_air_monitor(self):
         """telemetry.in_air() 를 한 곳에서만 구독해 최신값을 보관한다 (접지 판정·착륙 대기가 폴링으로 쓴다)."""
         try:
@@ -944,6 +994,18 @@ class Vehicle(object):
         await self.preflight_vio_gate()          # 실패하면 PreflightAbort (arm 안 함)
         await asyncio.sleep(max(0.0, prime_sec - min(1.0, prime_sec / 3.0) - (self.now() - t_gate)))
 
+        # PX4 가 LAND/RTL 등 자동 모드에 남아 있으면 arm 이 거부된다(2026-11-12: 직전 비상 land 폴백 뒤 nav_state LAND → 'command temporarily rejected').
+        # setpoint 는 이미 흐르고 있으므로 먼저 OFFBOARD 로 바꾼 뒤 arm 한다.
+        fm = await self.current_flight_mode()
+        if fm in ("LAND", "RETURN_TO_LAUNCH", "MISSION", "TAKEOFF", "FOLLOW_ME"):
+            log("       PX4 is in {} — switching to OFFBOARD before arming".format(fm))
+            self.event("mode_fix", fm)
+            try:
+                await self.drone.offboard.start()
+                await asyncio.sleep(0.5)
+                log("       mode now {}".format(await self.current_flight_mode()))
+            except Exception as e:  # noqa: BLE001
+                log("       offboard.start() before arm failed ({}); trying to arm anyway".format(e))
         log("[6/7] Arming...")
         await self.drone.action.arm()
         self.event("armed")
@@ -1266,7 +1328,7 @@ class Vehicle(object):
         if fb_start is None:
             raise RuntimeError("Reach feedback not available before stage '{}'".format(name))
         mav_start_rel = self.mav_rel_position()
-        dn_u, de_u = body_delta_to_ned(forward_m, right_m, self.plan_yaw)
+        dn_u, de_u = body_delta_to_ned(forward_m, right_m, self.plan_yaw + self.sim_cmd_yaw_bias_deg)
         norm = math.sqrt(dn_u * dn_u + de_u * de_u)
         if norm < 1e-9:
             raise ValueError("move_until: 방향이 0 이다")
@@ -1379,7 +1441,7 @@ class Vehicle(object):
 
     async def move_body(self, forward_m, right_m, name, label, speed_mps=None, alt=None):
         """계획 위치에서 기체 프레임(현재 계획 yaw 기준) 상대 이동."""
-        dn, de = body_delta_to_ned(forward_m, right_m, self.plan_yaw)
+        dn, de = body_delta_to_ned(forward_m, right_m, self.plan_yaw + self.sim_cmd_yaw_bias_deg)
         target_alt = self.plan_alt if alt is None else alt
         log("       [move_body {}] fwd{:+.2f} right{:+.2f} @yaw{:+.1f} -> dN{:+.2f} dE{:+.2f} -> N{:+.2f} E{:+.2f} U{:+.2f}".format(
             name, forward_m, right_m, self.plan_yaw, dn, de, self.plan_n + dn, self.plan_e + de, target_alt))
@@ -1736,7 +1798,7 @@ class Vehicle(object):
     async def cancel_background_tasks(self):
         self.streaming = False
         self.monitoring = False
-        tasks = [self.stream_task, self.mav_task, self.mav_stream_task, self.mav_lag_task, self.armed_task, self.in_air_task, self.status_task, self.att_stream_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
+        tasks = [self.stream_task, self.mav_task, self.mav_stream_task, self.mav_lag_task, self.armed_task, self.in_air_task, self.status_task, self.mode_task, self.att_stream_task, self.health_task, self.sync_task, self.vio_task, self.vio_mon_task] + list(self.voxl_tasks)
         for task in tasks:
             if task and not task.done():
                 task.cancel()

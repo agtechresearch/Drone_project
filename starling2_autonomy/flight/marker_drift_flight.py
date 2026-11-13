@@ -53,7 +53,7 @@ from s2flight import align as al                                    # noqa: E402
 from s2flight import mpa                                            # noqa: E402
 from s2flight.align_stage import AlignParams, run_alignment         # noqa: E402
 from s2flight.config import FlightConfig                            # noqa: E402
-from s2flight.drift import BannerLayout, DriftMonitor, center_on_tag  # noqa: E402
+from s2flight.drift import BannerLayout, DriftMonitor, center_on_tag, any_stop  # noqa: E402
 from s2flight.recorder import FlightRecorder                        # noqa: E402
 from s2flight.sim import DEFAULT_TAG_PORT, UdpTagFeed               # noqa: E402
 from s2flight.tags import MpaTagFeed                                # noqa: E402
@@ -67,17 +67,19 @@ DEFAULT_OUT_ROOT = "/home/root/marker_drift_logs"
 class DriftParams(object):
     """실험 시퀀스 파라미터 (docs/09 §5.2 + 2026-11-09 태그 정지 설계)."""
 
-    def __init__(self, altitude=0.6, distance=5.0, speed=0.25, turn_deg=0.0, turn_speed=20.0,
+    def __init__(self, altitude=0.6, distance=5.0, speed=0.25, turn_deg=0.0, turn_speed=20.0, post_align_turn_deg=0.0,
                  post_turn_hover=2.0, hover_ref=10.0, hover_far=5.0, hover_return=5.0,
                  do_align=True, align=None, condition="A", run=1, standoff=0.70,
                  stop_mode="tag", start_tag=0, end_tag=9, tag_spacing=0.5, center=True, center_tol=0.05,
-                 center_standoff=True, max_extra=1.0, tag_stale=0.4):
+                 center_standoff=True, max_extra=1.0, tag_stale=0.4,
+                 standoff_guard=True, standoff_min=0.35, standoff_max=1.2):
         self.altitude = altitude
         self.distance = distance              # stop_mode=distance 에서만 비행에 쓰인다
         self.speed = speed
         self.turn_deg = turn_deg
         self.turn_speed = turn_speed
         self.post_turn_hover = post_turn_hover
+        self.post_align_turn_deg = post_align_turn_deg    # 정렬 뒤 고정 추가 회전 (카메라-기체 yaw 오프셋 보정; 2026-11-12 A1: 이격이 0.17 m/m 증가 → 약 -10°)
         self.hover_ref = hover_ref
         self.hover_far = hover_far
         self.hover_return = hover_return
@@ -95,6 +97,9 @@ class DriftParams(object):
         self.center_standoff = center_standoff  # 센터링 때 이격도 standoff 로 맞춘다
         self.max_extra = max_extra            # 태그 모드 안전 상한 = 현수막 길이 + 이 값
         self.tag_stale = tag_stale            # 이보다 오래된 검출은 정지 판정에 안 쓴다 s
+        self.standoff_guard = standoff_guard  # v0.2.10: 태그 진실값 이격이 [min,max] 를 벗어나면 레그 정지 → 호버 → 복귀 (착륙 아님)
+        self.standoff_min = standoff_min      # 현수막 쪽 하한 m (out·back 공통)
+        self.standoff_max = standoff_max      # 바깥 상한 m (out 에만; back 은 out 끝 이격에서 출발하므로 하한만)
 
     def layout(self):
         return BannerLayout(self.start_tag, self.end_tag, self.tag_spacing)
@@ -159,6 +164,15 @@ async def run_sequence(v, params, feed=None, recorder=None):
                 await v.preland_and_land()
                 summary["aborted"] = True
                 return summary
+            if abs(p.post_align_turn_deg) >= 0.1:
+                log("       post-align turn {:+.1f} deg (camera-body yaw offset compensation)".format(p.post_align_turn_deg))
+                v.event("post_align_turn", "{:+.1f}".format(p.post_align_turn_deg))
+                await v.turn(p.post_align_turn_deg, "post_align_turn", "POSTALIGN{:+.0f}".format(p.post_align_turn_deg), yaw_speed_deg_s=p.turn_speed)
+                await v.hover(1.0, "post_align_settle")
+                if v.aborted:
+                    await v.land_and_disarm()
+                    summary["aborted"] = True
+                    return summary
             if p.center:
                 mon.set_leg("center")
                 c = await center_on_tag(v, mon, p.start_tag, tol_m=p.center_tol,
@@ -193,7 +207,8 @@ async def run_sequence(v, params, feed=None, recorder=None):
         if p.stop_mode == "tag":
             max_dist = layout.length_m + p.max_extra
             mon.set_leg("out")
-            ok = await v.move_until(0.0, +1.0, "move_out", "RIGHT", mon.centered_stop(p.end_tag, +1, p.center_tol),
+            guard_out = mon.standoff_guard(p.standoff_min, p.standoff_max) if p.standoff_guard else None
+            ok = await v.move_until(0.0, +1.0, "move_out", "RIGHT", any_stop(mon.centered_stop(p.end_tag, +1, p.center_tol), guard_out),
                                     p.speed, max_dist)
             r = v.results[-1]
             summary["legs"].append(mon.leg_summary("out", r["status"], r["stop_reason"]))
@@ -208,7 +223,14 @@ async def run_sequence(v, params, feed=None, recorder=None):
             await v.hover(p.hover_far, "hover_far")
             summary["legs_settled"].append(mon.leg_summary("out_settled", "HOVER_END", "after hover_far"))
             mon.set_leg("back")
-            ok = await v.move_until(0.0, -1.0, "move_back", "LEFT", mon.centered_stop(p.start_tag, -1, p.center_tol),
+            # back 레그 가드: out 이 가드로 끝났으면 출발 이격이 이미 하한 근처 → 하한을 "지금 이격 − 0.05" 까지 내려 즉시 재발동을 막는다
+            # (복귀는 같은 길을 되돌아오므로 이격은 커져야 정상; 더 줄어들면 그때 정지). 상한은 없음.
+            guard_back = None
+            if p.standoff_guard:
+                e_now = mon.fresh_estimate(v.now(), 2.0)
+                back_min = p.standoff_min if e_now is None or e_now.truth_standoff != e_now.truth_standoff else min(p.standoff_min, e_now.truth_standoff - 0.05)
+                guard_back = mon.standoff_guard(back_min, float("inf"))
+            ok = await v.move_until(0.0, -1.0, "move_back", "LEFT", any_stop(mon.centered_stop(p.start_tag, -1, p.center_tol), guard_back),
                                     p.speed, max_dist)
             r = v.results[-1]
             summary["legs"].append(mon.leg_summary("back", r["status"], r["stop_reason"]))
@@ -271,6 +293,8 @@ def build_arg_parser():
     a.add_argument("--align-tol", type=float, default=1.5, help="허용오차 deg. 정지 촬영 σ 로 max(1, 3σ) 갱신 (§5.3)")
     a.add_argument("--align-hold", type=float, default=1.0)
     a.add_argument("--align-timeout", type=float, default=15.0, help="초과 시 착륙 (확정)")
+    a.add_argument("--post-align-turn", type=float, default=0.0,
+                   help="정렬 뒤 추가 회전 deg (양수 = 우회전). 카메라와 기체 yaw 오프셋 보정. 2026-11-12 A1: 우측 이동 중 이격이 0.17 m/m 증가 → 기체 코가 법선 우측 ~10° → -10 권장")
     a.add_argument("--align-gain", type=float, default=0.8)
     a.add_argument("--align-max-step", type=float, default=15.0)
     a.add_argument("--align-settle", type=float, default=0.4)
@@ -297,6 +321,9 @@ def build_arg_parser():
     t.add_argument("--no-standoff-correct", action="store_true", help="센터링 때 이격(--standoff) 보정 생략, 좌우만")
     t.add_argument("--max-extra", type=float, default=1.0, help="태그 모드 안전 상한 = 현수막 길이 + 이 값 m. 넘으면 그 자리 착륙")
     t.add_argument("--tag-stale", type=float, default=0.4, help="이보다 오래된 검출은 정지 판정에 쓰지 않음 s")
+    t.add_argument("--standoff-min", type=float, default=0.35, help="이격 안전 하한 m (태그 진실값, v0.2.10): 밑돌면 레그 정지·호버·복귀")
+    t.add_argument("--standoff-max", type=float, default=1.2, help="이격 안전 상한 m (out 레그만). A 넓은 공간은 2.0 정도, 통로 B 는 벽까지 거리 − 0.3")
+    t.add_argument("--no-standoff-guard", action="store_true", help="이격 안전 정지 끄기 (권장 안 함)")
 
     r = p.add_argument_group("기록")
     r.add_argument("--out-dir", default="", help="산출물 폴더. 기본 {}/<시각>_<조건><회차>".format(DEFAULT_OUT_ROOT))
@@ -320,11 +347,13 @@ def make_params(args):
                         yaw_speed_deg_s=args.align_yaw_speed, expected_tag_size_m=args.tag_size)
     return DriftParams(altitude=args.altitude, distance=args.distance, speed=args.speed,
                        turn_deg=args.turn_deg, turn_speed=args.turn_speed, post_turn_hover=args.post_turn_hover,
+                       post_align_turn_deg=args.post_align_turn,
                        hover_ref=args.hover_ref, hover_far=args.hover_far, hover_return=args.hover_return,
                        do_align=not args.no_align, align=align, condition=args.condition, run=args.run,
                        standoff=args.standoff, stop_mode=args.stop_mode, start_tag=args.start_tag, end_tag=args.end_tag,
                        tag_spacing=args.tag_spacing, center=not args.no_center, center_tol=args.center_tol,
-                       center_standoff=not args.no_standoff_correct, max_extra=args.max_extra, tag_stale=args.tag_stale)
+                       center_standoff=not args.no_standoff_correct, max_extra=args.max_extra, tag_stale=args.tag_stale,
+                       standoff_guard=not args.no_standoff_guard, standoff_min=args.standoff_min, standoff_max=args.standoff_max)
 
 
 def print_banner(args, params, cfg, out_dir):

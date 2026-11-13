@@ -83,7 +83,8 @@ class FakeDrone(object):
         self.core = _Obj(connection_state=self._conn)
         self.telemetry = _Obj(health=self._health, position_velocity_ned=self._pos, in_air=self._in_air,
                               attitude_euler=self._att, odometry=self._odom, armed=self._armed_stream,
-                              status_text=self._status_text)
+                              status_text=self._status_text, flight_mode=self._flight_mode)
+        self.flight_mode_name = "POSCTL"
         self.status_texts = []          # (type, text) 를 넣어 두면 스트림이 한 번씩 내보낸다
         self.odom_lag_s = 0.0          # odometry time_usec 를 이만큼 과거로 찍어 MAVSDK 소비 지연을 흉내
         self.pos_period = 0.05         # position_velocity_ned 발행 주기 (20 Hz 기본; 60 Hz 로 올려 소비 루프를 시험)
@@ -191,6 +192,11 @@ class FakeDrone(object):
             yield _Obj(is_local_position_ok=True)
             await asyncio.sleep(0.02)
 
+    async def _flight_mode(self):
+        while True:
+            yield _Obj(name=self.flight_mode_name)
+            await asyncio.sleep(0.1)
+
     async def _status_text(self):
         sent = 0
         while True:
@@ -292,10 +298,11 @@ class FakeBannerCamera(tags.TagFeed):
     """
 
     def __init__(self, drone, wall_facing_yaw_deg=270.0, standoff=0.7, spacing=0.1, n_tags=11, drift_scale=0.0,
-                 fps=20.0, size_m=0.20, half_fov=60.0, max_range=3.0, hide_ids=(), start_id=0):
+                 fps=20.0, size_m=0.20, half_fov=60.0, max_range=3.0, hide_ids=(), start_id=0, standoff_slope=0.0):
         self.drone = drone
         self.wall_yaw = wall_facing_yaw_deg
         self.standoff0 = standoff
+        self.standoff_slope = standoff_slope   # v0.2.10: 헤딩-위치 프레임 어긋남 흉내 — along 1 m 당 이격 변화 m (실기 2026-11-12 A1: +0.17)
         self.spacing = spacing
         self.n_tags = n_tags
         self.k = drift_scale
@@ -315,7 +322,8 @@ class FakeBannerCamera(tags.TagFeed):
         rn, re_ = util.body_delta_to_ned(0.0, 1.0, self.wall_yaw)
         along_est = self.drone.n * rn + self.drone.e * re_
         fwd_est = self.drone.n * fn + self.drone.e * fe
-        return along_est * (1.0 - self.k), self.standoff0 - fwd_est
+        along_true = along_est * (1.0 - self.k)
+        return along_true, self.standoff0 - fwd_est + self.standoff_slope * along_true
 
     def poll(self, now):
         if now - self.last_t < self.period:
@@ -622,6 +630,49 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
 # --- 정렬 실패 → 착륙 ----------------------------------------------------------
+
+print("\n[standoff guard — tag mode, heading/position frame bias (v0.2.10)]")
+tmp = tempfile.mkdtemp(prefix="s2flight_test_")
+try:
+    # 이격이 along 1 m 당 -0.45 m 줄어든다(현수막 쪽으로) → 하한 0.35 에 along ≈ 0.78 m 에서 걸려야 한다 (태그 10 = 1.0 m 전)
+    drone = FakeDrone(yaw0=0.0)
+    cam = FakeBannerCamera(drone, 278.0, standoff_slope=-0.45)
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(standoff_min=0.35, standoff_max=1.2), cam, tmp))
+    lo = seq["legs"][0] if seq["legs"] else {}
+    ok("guard: out leg STOPPED by standoff guard (not tag 10)", lo.get("status") == "STOPPED" and "standoff guard" in lo.get("reason", "") and "< 0.35" in lo.get("reason", ""), str(lo)[:160])
+    ok("guard: stopped before reaching the end tag (truth along 0.6..0.95)", 0.6 < lo.get("truth_along", 9) < 0.95, str(lo.get("truth_along")))
+    ok("guard: back leg still ends at tag 0 and sequence completes (no abort)", len(seq["legs"]) == 2 and "tag 0" in seq["legs"][1]["reason"] and seq["completed"] and not v.aborted,
+       str([l.get("reason", "")[:40] for l in seq["legs"]]) + " completed=%s" % seq["completed"])
+    # 상한: 이격이 바깥으로 벌어지는 경우 (A1 과 같은 부호, 0.45 m/m)
+    drone = FakeDrone(yaw0=0.0)
+    cam = FakeBannerCamera(drone, 278.0, standoff_slope=+0.45)
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(standoff_min=0.35, standoff_max=1.0), cam, tmp))
+    lo = seq["legs"][0] if seq["legs"] else {}
+    ok("guard: out leg STOPPED by standoff max", lo.get("status") == "STOPPED" and "> 1.00" in lo.get("reason", ""), str(lo.get("reason"))[:120])
+    ok("guard: back leg not blocked by max (min only) -> tag 0", len(seq["legs"]) == 2 and "tag 0" in seq["legs"][1]["reason"] and seq["completed"],
+       str([l.get("reason", "")[:40] for l in seq["legs"]]))
+    # 끄면 종전과 같이 태그 10 까지 간다
+    drone = FakeDrone(yaw0=0.0)
+    cam = FakeBannerCamera(drone, 278.0, standoff_slope=-0.3)
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(standoff_guard=False), cam, tmp))
+    ok("guard off: out leg reaches tag 10", seq["legs"] and "tag 10" in seq["legs"][0]["reason"], str(seq["legs"][:1])[:120])
+    # any_stop 단위
+    from s2flight.drift import any_stop
+    f = any_stop(None, lambda t: None, lambda t: "second", lambda t: "third")
+    ok("any_stop returns first reason, skips None", f(0.0) == "second")
+    ok("any_stop none -> None", any_stop(lambda t: None)(0.0) is None)
+    # SITL 시험 훅: S2_SIM_CMD_YAW_BIAS_DEG 는 sim 기체에서만 적용, 실기에선 0
+    os.environ["S2_SIM_CMD_YAW_BIAS_DEG"] = "-7"
+    try:
+        vs = Vehicle(fast_cfg(sim=True), recorder=None, drone=FakeDrone(), pose_readers=False, initial_yaw=0.0)
+        vr = Vehicle(fast_cfg(sim=False), recorder=None, drone=FakeDrone(), pose_readers=False, initial_yaw=0.0)
+    finally:
+        del os.environ["S2_SIM_CMD_YAW_BIAS_DEG"]
+    ok("sim cmd-yaw-bias hook: sim vehicle takes -7", abs(vs.sim_cmd_yaw_bias_deg + 7.0) < 1e-9, str(vs.sim_cmd_yaw_bias_deg))
+    ok("sim cmd-yaw-bias hook: real vehicle ignores it", vr.sim_cmd_yaw_bias_deg == 0.0, str(vr.sim_cmd_yaw_bias_deg))
+    ok("no env -> 0", Vehicle(fast_cfg(sim=True), recorder=None, drone=FakeDrone(), pose_readers=False, initial_yaw=0.0).sim_cmd_yaw_bias_deg == 0.0)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
 
 print("\n[full sequence — align failure lands]")
 tmp = tempfile.mkdtemp(prefix="s2flight_test_")
@@ -1318,7 +1369,7 @@ try:
 
     def _drift_after_offboard(d):
         if d.vehicle is not None and d.vehicle.offboard_active:
-            d.ekf_yaw_drift_dps = 60.0
+            d.ekf_yaw_drift_dps = 25.0        # 45 deg/s 회전 가드 아래에서 (실기 자이로 바이어스 사례 3.5 deg/s 와 같은 '느린' 발산)
     drone.on_step = _drift_after_offboard
     v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
     ok("in-flight EKF-vs-VIO heading divergence -> emergency land", v.aborted and "HEADING DISAGREEMENT" in (v.abort_reason or "") and landed_cmd(drone),
@@ -1405,6 +1456,15 @@ try:
     drone.refuse_first = True
     v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
     ok("touchdown: disarm or force-disarm issued right after landed", seq["completed"] and ("disarm" in drone.cmd_log or "kill" in drone.cmd_log), str(drone.cmd_log[-4:]))
+
+    # (t7) PX4 가 LAND 모드에 남아 있으면 arm 전에 OFFBOARD 로 바꾼다
+    drone = FakeDrone()
+    drone.flight_mode_name = "LAND"
+    v, rec, seq, written = loop.run_until_complete(run_flight(drone, fast_cfg(), fast_params(do_align=False, stop_mode="distance"), None, tmp))
+    _i_ob = drone.cmd_log.index("offboard_start") if "offboard_start" in drone.cmd_log else -1
+    _i_arm = drone.cmd_log.index("arm") if "arm" in drone.cmd_log else -1
+    ok("LAND mode at start -> offboard.start before arm, flight completes", seq["completed"] and 0 <= _i_ob < _i_arm and "mode_fix" in [e["event"] for e in rec.events],
+       str(drone.cmd_log[:4]))
 
     # (e) 정상 기체: 통과, 요약에 yaw 샘플 수
     drone = FakeDrone()

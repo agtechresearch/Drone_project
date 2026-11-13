@@ -12,6 +12,7 @@
 #      KEEP_SITL(0 = 끝나면 인스턴스 정지) NO_TAGS(0)
 #      INJECT('{}') vio_relay.py 오차 주입 JSON: rot_deg(VIO 프레임 회전 °), drift_n/drift_e(m/s), step_e/step_at(m, 이륙 후 s),
 #                   noise_pos_m/noise_vel_m_s. 산출물 inject.json 에 남는다.
+#      CMD_YAW_BIAS=<deg>: 명령 프레임의 우측을 헤딩에서 이만큼 돌림 (v0.2.10 이격 안전 정지 검증; 실기 A1 은 +10 에 해당)
 #      VIO_FAIL_AT=<s> [VIO_FAIL_FROM=offboard|start] [VIO_FAIL_JSON=<json>] [VIO_RECOVER_AFTER=<s>]: offboard 시작(기본) s 초 뒤 시뮬 VIO 상태를 상실로 바꿔
 #                   비행 코드의 VIO 감시(비상 착륙)를 검증한다 (s2flight.sim.sim_vio_task, 2026-11-10 사고 대책).
 set -u
@@ -96,7 +97,8 @@ fi
 
 # 4. 비행 (starling-flight: Python 3.6.9 + MAVSDK 0.12.0)
 step "비행: marker_drift_flight.py --sim --port $MAVSDK_PORT $TAGARGS $*"
-docker exec -i starling-flight bash -c "cd $MD_IN_FLIGHT/flight && S2_SIM_VIO_FILE=$OUT_IN_FLIGHT/sim_vio.json timeout -s INT ${MISSION_TIMEOUT:-600} python3 marker_drift_flight.py --sim --port $MAVSDK_PORT $TAGARGS --out-dir $OUT_IN_FLIGHT -y $*" 2>&1 \
+echo "cmd_yaw_bias=${CMD_YAW_BIAS:-}" >> "$OUT/args.txt"   # v0.2.10: CMD_YAW_BIAS=<deg> 면 명령 프레임 우측을 헤딩에서 이만큼 돌린다 (실기 헤딩-위치 어긋남 재현, 이격 안전 정지 검증)
+docker exec -i starling-flight bash -c "cd $MD_IN_FLIGHT/flight && S2_SIM_VIO_FILE=$OUT_IN_FLIGHT/sim_vio.json S2_SIM_CMD_YAW_BIAS_DEG=${CMD_YAW_BIAS:-} timeout -s INT ${MISSION_TIMEOUT:-600} python3 marker_drift_flight.py --sim --port $MAVSDK_PORT $TAGARGS --out-dir $OUT_IN_FLIGHT -y $*" 2>&1 \
   | tee -a "$OUT/mission.log" | grep --line-buffered -E "^\[|\[align\]|\[vio|REACHED|TIMEOUT|EMERGENCY|GEOFENCE|PREFLIGHT|REFUSED|DISAGREE|Traceback|Exception|Landed|Disarmed|OK |FAILED|WARNING" | cut -c1-160
 RC=${PIPESTATUS[0]}
 
